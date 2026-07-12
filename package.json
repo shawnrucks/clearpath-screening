@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev --webpack -p 3010",
     "build": "next build --webpack",
-    "start": "next start -p 3010"
+    "start": "next start -p ${PORT:-3010}",
+    "typecheck": "tsc --noEmit --pretty false",
+    "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

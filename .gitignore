@@ -1,8 +1,9 @@
 node_modules/
 .next/
-data/*.sqlite3
+data/*
 .herenow/
 .env*
 !.env.example
 .DS_Store
 npm-debug.log*
+*.tsbuildinfo

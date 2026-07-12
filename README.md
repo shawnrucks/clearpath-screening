@@ -22,4 +22,8 @@ Open `http://localhost:3010` and sign in with:
 - Server-side login, audit events, reports, workflow updates, and complete demo reset
 - 50 seeded orders, 150 searches, 10 QA items, and 100+ audit events
 
-The `here-demo/` directory contains the static public demonstration published to here.now. The full local application retains server-side SQLite persistence.
+## Deployment
+
+The canonical application requires a Node.js runtime and persistent disk because operational actions are server-backed. `render.yaml` describes a compatible deployment. Set a strong `SESSION_SECRET` in every hosted environment.
+
+The former hand-written here.now artifact was removed. here.now is a static host and cannot run the canonical Next.js and SQLite application. A here.now URL may redirect or link to the canonical Node deployment, but the UI must not be independently reimplemented there.

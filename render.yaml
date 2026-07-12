@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: clearpath-screening
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: CLEARPATH_SESSION_SECRET
+        generateValue: true
+    disk:
+      name: clearpath-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

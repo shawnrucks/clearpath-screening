@@ -1,2 +1,30 @@
-import {NextResponse} from "next/server"; import {getClearPath} from "@/lib/clearpath";
-export async function POST(req:Request){const b=await req.json();const u=getClearPath().prepare("SELECT * FROM cp_users WHERE email=? AND password=? AND role=?").get(b.email,b.password,b.role) as {name:string;role:string}|undefined;if(!u)return NextResponse.json({error:"invalid"},{status:401});const r=NextResponse.json({ok:true});r.cookies.set("cp_user",JSON.stringify({name:u.name,role:u.role}),{httpOnly:true,sameSite:"lax",path:"/"});return r}
+import {NextRequest, NextResponse} from "next/server";
+import {createSessionToken, isSameOrigin, setSessionCookie} from "@/lib/auth";
+import {getClearPath, verifyPassword} from "@/lib/clearpath";
+
+type LoginBody = {email?: unknown; password?: unknown; role?: unknown};
+
+export async function POST(request: NextRequest) {
+  if (!isSameOrigin(request)) return NextResponse.json({error: "Forbidden"}, {status: 403});
+  let body: LoginBody;
+  try {
+    body = await request.json() as LoginBody;
+  } catch {
+    return NextResponse.json({error: "Invalid request"}, {status: 400});
+  }
+  if (
+    typeof body.email !== "string" || body.email.length > 254 ||
+    typeof body.password !== "string" || body.password.length > 128 ||
+    typeof body.role !== "string" || body.role.length > 64
+  ) return NextResponse.json({error: "Invalid request"}, {status: 400});
+
+  const user = getClearPath().prepare(
+    "SELECT email,name,role,password FROM cp_users WHERE lower(email)=lower(?) AND role=?",
+  ).get(body.email.trim(), body.role) as {email: string; name: string; role: string; password:string} | undefined;
+  if (!user || !verifyPassword(body.password,user.password)) return NextResponse.json({error: "Invalid credentials"}, {status: 401});
+
+  const response = NextResponse.json({ok: true, role: user.role});
+  setSessionCookie(response, createSessionToken({email:user.email,name:user.name,role:user.role}));
+  response.cookies.delete("cp_user");
+  return response;
+}
