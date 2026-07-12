@@ -18,8 +18,8 @@ const users=[
 const sessions={};
 let assertions=0;
 function check(value,message){assert.ok(value,message);assertions++}
-async function request(path,{cookie,method="GET",body,requestOrigin=origin,redirect}={}){
-  const headers={};
+async function request(path,{cookie,method="GET",body,requestOrigin=origin,redirect,extraHeaders={}}={}){
+  const headers={...extraHeaders};
   if(body!==undefined)headers["content-type"]="application/json";
   if(cookie)headers.cookie=cookie;
   if(requestOrigin)headers.origin=requestOrigin;
@@ -38,6 +38,7 @@ try{
   await expectStatus("/api/clearpath/queue?slug=overdue-searches",401);
   await expectStatus("/api/clearpath/action",401,{method:"POST",body:{action:"x",entityId:"SRC-5001"}});
   await expectStatus("/api/clearpath/login",403,{method:"POST",requestOrigin:"https://evil.example",body:{email:"operations@clearpath.local",password:"demo123",role:"Operations Specialist"}});
+  await expectStatus("/api/clearpath/login",200,{method:"POST",requestOrigin:"https://clearpath.example",extraHeaders:{"x-forwarded-host":"clearpath.example","x-forwarded-proto":"https"},body:{email:"operations@clearpath.local",password:"demo123",role:"Operations Specialist"}});
   await expectStatus("/api/clearpath/login",401,{method:"POST",body:{email:"operations@clearpath.local",password:"wrong",role:"Operations Specialist"}});
 
   for(const [key,email,role] of users)sessions[key]=await login(email,role);

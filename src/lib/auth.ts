@@ -96,7 +96,17 @@ export function isSameOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
   if (!origin) return request.headers.get("sec-fetch-site") === "same-origin";
   try {
-    return new URL(origin).origin === request.nextUrl.origin;
+    const suppliedOrigin = new URL(origin).origin;
+    const forwardedHost = request.headers.get("x-forwarded-host")
+      ?.split(",")[0]
+      .trim() || request.headers.get("host");
+    const forwardedProto = request.headers.get("x-forwarded-proto")
+      ?.split(",")[0]
+      .trim() || request.nextUrl.protocol.replace(":", "");
+    const forwardedOrigin = forwardedHost
+      ? `${forwardedProto}://${forwardedHost}`
+      : null;
+    return suppliedOrigin === request.nextUrl.origin || suppliedOrigin === forwardedOrigin;
   } catch {
     return false;
   }
