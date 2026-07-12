@@ -15,6 +15,12 @@ Open `http://localhost:3010` and sign in with:
 - Password: `demo123`
 - Role: `Operations Specialist`
 
+Run the repeatable 90-assertion backend suite while the development server is running:
+
+```bash
+npm run test:e2e
+```
+
 ## Architecture
 
 - Next.js, React, and TypeScript

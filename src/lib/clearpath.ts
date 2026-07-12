@@ -36,6 +36,7 @@ function schema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS cp_billing(id INTEGER PRIMARY KEY,order_id INTEGER,search_id INTEGER,issue TEXT,vendor_cost REAL,expected_cost REAL,client_price REAL,status TEXT);
     CREATE TABLE IF NOT EXISTS cp_audit(id INTEGER PRIMARY KEY AUTOINCREMENT,ts TEXT,user TEXT,role TEXT,action TEXT,entity_type TEXT,entity_id TEXT,previous_value TEXT,new_value TEXT,note TEXT,source TEXT,session_id TEXT);
     CREATE TABLE IF NOT EXISTS cp_reports(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT,summary TEXT,highlights TEXT,created_by TEXT,created_at TEXT);
+    CREATE TABLE IF NOT EXISTS cp_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,note TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS cp_vendors(id INTEGER PRIMARY KEY,name TEXT,coverage TEXT,jurisdictions TEXT,turnaround TEXT,cost REAL,quality INTEGER,preferred INTEGER,status TEXT,contact TEXT);
     CREATE TABLE IF NOT EXISTS cp_meta(key TEXT PRIMARY KEY,value TEXT);
     CREATE INDEX IF NOT EXISTS idx_cp_orders_status ON cp_orders(status);
@@ -46,13 +47,14 @@ function schema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_cp_qa_order_status ON cp_qa(order_id,status);
     CREATE INDEX IF NOT EXISTS idx_cp_billing_order_status ON cp_billing(order_id,status);
     CREATE INDEX IF NOT EXISTS idx_cp_audit_entity ON cp_audit(entity_type,entity_id);
+    CREATE INDEX IF NOT EXISTS idx_cp_notes_entity ON cp_notes(entity_type,entity_id,created_at);
   `);
 }
 
 export function resetClearPath() {
   const db = getClearPath();
   const tx = db.transaction(() => {
-    ["cp_users","cp_clients","cp_candidates","cp_orders","cp_searches","cp_qa","cp_billing","cp_audit","cp_reports","cp_vendors","cp_meta"].forEach(t=>db.exec(`DELETE FROM ${t}`));
+    ["cp_users","cp_clients","cp_candidates","cp_orders","cp_searches","cp_qa","cp_billing","cp_audit","cp_reports","cp_notes","cp_vendors","cp_meta"].forEach(t=>db.exec(`DELETE FROM ${t}`));
     const users = [
       ["admin@clearpath.local","Administrator","Morgan Ellis"],["operations@clearpath.local","Operations Specialist","Taylor Reed"],["qa@clearpath.local","QA Reviewer","Jordan Lee"],
       ["client.admin@clearpath.local","Client Administrator","Casey Martin"],["candidate@clearpath.local","Candidate","Alex Parker"],["researcher@clearpath.local","Researcher / Vendor","Jamie Ford"],
@@ -93,10 +95,16 @@ const field = (values:Record<string,string>, ...names:string[]) => names.map(nam
 
 /** Applies a supported portal action and its audit record in one SQLite transaction. */
 export function applyPortalAction(input:ActionRequest, actor:ActionActor) {
-  const db=getClearPath(), action=clean(input.action,120), entityId=clean(input.entityId,80), note=clean(input.note,2000);
+  const db=getClearPath(), action=clean(input.action,120), requestedEntityId=clean(input.entityId,80), note=clean(input.note,2000);
+  let entityId=requestedEntityId;
   const values=input.values && typeof input.values === "object" ? input.values : {};
   if(!action || !entityId) throw new Error("Action and entity are required");
   return db.transaction(() => {
+    if(entityId==="Selected QA report"){
+      const selected=db.prepare("SELECT qa_id FROM cp_qa WHERE status='Pending Review' ORDER BY CASE priority WHEN 'High' THEN 0 ELSE 1 END,age DESC,id LIMIT 1").get() as {qa_id:string}|undefined;
+      if(!selected)throw new Error("No pending QA item found");
+      entityId=selected.qa_id;
+    }
     let entityType="Record", before:Row|undefined, after:Row|undefined;
     if(entityId.startsWith("SRC-")) {
       entityType="Search";
@@ -107,21 +115,27 @@ export function applyPortalAction(input:ActionRequest, actor:ActionActor) {
       if(action==="Send to Compliance Review") status="Compliance Review";
       if(status && !allowedStatuses.has(status)) throw new Error("Unsupported status");
       const vendor=field(values,"Approved Vendor") || String(before.vendor||"");
+      if(field(values,"Approved Vendor")&&!db.prepare("SELECT 1 FROM cp_vendors WHERE name=? AND status='Active'").get(vendor))throw new Error("Unknown approved vendor");
       const costText=field(values,"Confirmed Vendor Cost"), cost=costText ? Number(costText.replace(/[$,]/g,"")) : Number(before.vendor_cost||0);
       if(!Number.isFinite(cost) || cost<0 || cost>100000) throw new Error("Invalid vendor cost");
       const due=field(values,"Due Date","Follow-Up Date","Expected Completion Date") || String(before.due_date||"");
+      if(due&&!/^\d{4}-\d{2}-\d{2}$/.test(due))throw new Error("Invalid date");
       const nextNotes=note ? [before.notes,note].filter(Boolean).join("\n") : String(before.notes||"");
       db.prepare("UPDATE cp_searches SET status=?,vendor=?,vendor_cost=?,due_date=?,notes=?,last_activity=datetime('now') WHERE search_id=?").run(status||before.status,vendor,cost,due||null,nextNotes,entityId);
       after=db.prepare("SELECT search_id,status,vendor,vendor_cost,due_date,notes,last_activity FROM cp_searches WHERE search_id=?").get(entityId) as Row;
     } else if(entityId.startsWith("CP-")) {
       entityType="Order";
-      before=db.prepare("SELECT order_id,status,assigned_to,issue FROM cp_orders WHERE order_id=?").get(entityId) as Row|undefined;
+      before=db.prepare("SELECT order_id,status,assigned_to,target_date,issue FROM cp_orders WHERE order_id=?").get(entityId) as Row|undefined;
       if(!before) throw new Error("Order not found");
-      let status=field(values,"New Status"); if(action.includes("Send")&&action.includes("QA"))status="Quality Review";
+      let status=field(values,"New Status"); if(action.includes("Send")&&action.includes("QA"))status="Quality Review";if(status==="Completed")status="Complete";
       if(status && !allowedStatuses.has(status)) throw new Error("Unsupported status");
-      const assignee=field(values,"Assigned Reviewer") || String(before.assigned_to||""), issue=note || String(before.issue||"");
-      db.prepare("UPDATE cp_orders SET status=?,assigned_to=?,issue=? WHERE order_id=?").run(status||before.status,assignee,issue,entityId);
-      after=db.prepare("SELECT order_id,status,assigned_to,issue FROM cp_orders WHERE order_id=?").get(entityId) as Row;
+      const assignee=field(values,"Assigned Reviewer") || String(before.assigned_to||"");
+      if(field(values,"Assigned Reviewer")&&!db.prepare("SELECT 1 FROM cp_users WHERE name=? AND role IN ('QA Reviewer','Administrator')").get(assignee))throw new Error("Assigned reviewer not found");
+      const targetDate=field(values,"Follow-Up Date")||String(before.target_date||"");
+      if(targetDate&&!/^\d{4}-\d{2}-\d{2}$/.test(targetDate))throw new Error("Invalid date");
+      db.prepare("UPDATE cp_orders SET status=?,assigned_to=?,target_date=? WHERE order_id=?").run(status||before.status,assignee,targetDate||null,entityId);
+      if(note)db.prepare("INSERT INTO cp_notes(entity_type,entity_id,note,created_by,created_at) VALUES('Order',?,?,?,datetime('now'))").run(entityId,note,clean(actor.name,100));
+      after=db.prepare("SELECT order_id,status,assigned_to,target_date,issue FROM cp_orders WHERE order_id=?").get(entityId) as Row;
     } else if(entityId.startsWith("QA-")) {
       entityType="Quality Review";
       before=db.prepare("SELECT qa_id,status,reviewer,issue_count FROM cp_qa WHERE qa_id=?").get(entityId) as Row|undefined;
@@ -140,7 +154,8 @@ export function applyPortalAction(input:ActionRequest, actor:ActionActor) {
       db.prepare("UPDATE cp_billing SET status=?,vendor_cost=? WHERE id=?").run(status,fee,Number(entityId));
       after=db.prepare("SELECT id,status,vendor_cost,expected_cost,client_price,issue FROM cp_billing WHERE id=?").get(Number(entityId)) as Row;
     } else throw new Error("Unsupported record identifier");
-    db.prepare("INSERT INTO cp_audit(ts,user,role,action,entity_type,entity_id,previous_value,new_value,note,source,session_id) VALUES(datetime('now'),?,?,?,?,?,?,?,?,?,?)").run(clean(actor.name,100),clean(actor.role,100),action,entityType,entityId,JSON.stringify(before),JSON.stringify(after),note,"Web",clean(actor.sessionId,100)||"CURRENT-DEMO");
+    const evidence={record:after,submittedFields:values,requestedEntityId};
+    db.prepare("INSERT INTO cp_audit(ts,user,role,action,entity_type,entity_id,previous_value,new_value,note,source,session_id) VALUES(datetime('now'),?,?,?,?,?,?,?,?,?,?)").run(clean(actor.name,100),clean(actor.role,100),action,entityType,entityId,JSON.stringify(before),JSON.stringify(evidence),note,"Web",clean(actor.sessionId,100)||"CURRENT-DEMO");
     return {entityType,entityId,before,after};
   })();
 }
