@@ -1,0 +1,2 @@
+import {NextResponse} from "next/server"; import {getClearPath} from "@/lib/clearpath";
+export async function POST(req:Request){const b=await req.json();const u=getClearPath().prepare("SELECT * FROM cp_users WHERE email=? AND password=? AND role=?").get(b.email,b.password,b.role) as {name:string;role:string}|undefined;if(!u)return NextResponse.json({error:"invalid"},{status:401});const r=NextResponse.json({ok:true});r.cookies.set("cp_user",JSON.stringify({name:u.name,role:u.role}),{httpOnly:true,sameSite:"lax",path:"/"});return r}

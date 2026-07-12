@@ -1,0 +1,8 @@
+node_modules/
+.next/
+data/*.sqlite3
+.herenow/
+.env*
+!.env.example
+.DS_Store
+npm-debug.log*
