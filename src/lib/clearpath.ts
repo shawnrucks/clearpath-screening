@@ -37,6 +37,9 @@ function schema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS cp_audit(id INTEGER PRIMARY KEY AUTOINCREMENT,ts TEXT,user TEXT,role TEXT,action TEXT,entity_type TEXT,entity_id TEXT,previous_value TEXT,new_value TEXT,note TEXT,source TEXT,session_id TEXT);
     CREATE TABLE IF NOT EXISTS cp_reports(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT,summary TEXT,highlights TEXT,created_by TEXT,created_at TEXT);
     CREATE TABLE IF NOT EXISTS cp_notes(id INTEGER PRIMARY KEY AUTOINCREMENT,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,note TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS cp_invoices(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_number TEXT UNIQUE,billing_id INTEGER NOT NULL,order_id INTEGER NOT NULL,due_date TEXT NOT NULL,note TEXT,status TEXT NOT NULL,total REAL NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS cp_invoice_lines(id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL,description TEXT NOT NULL,amount REAL NOT NULL,FOREIGN KEY(invoice_id) REFERENCES cp_invoices(id) ON DELETE CASCADE);
+    CREATE TABLE IF NOT EXISTS cp_vendor_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,vendor_id INTEGER NOT NULL,subject TEXT NOT NULL,body TEXT NOT NULL,search_id TEXT,follow_up_date TEXT,direction TEXT NOT NULL,status TEXT NOT NULL,sent_by TEXT NOT NULL,sent_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS cp_vendors(id INTEGER PRIMARY KEY,name TEXT,coverage TEXT,jurisdictions TEXT,turnaround TEXT,cost REAL,quality INTEGER,preferred INTEGER,status TEXT,contact TEXT);
     CREATE TABLE IF NOT EXISTS cp_meta(key TEXT PRIMARY KEY,value TEXT);
     CREATE INDEX IF NOT EXISTS idx_cp_orders_status ON cp_orders(status);
@@ -48,13 +51,18 @@ function schema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_cp_billing_order_status ON cp_billing(order_id,status);
     CREATE INDEX IF NOT EXISTS idx_cp_audit_entity ON cp_audit(entity_type,entity_id);
     CREATE INDEX IF NOT EXISTS idx_cp_notes_entity ON cp_notes(entity_type,entity_id,created_at);
+    CREATE INDEX IF NOT EXISTS idx_cp_invoices_billing ON cp_invoices(billing_id,created_at);
+    CREATE INDEX IF NOT EXISTS idx_cp_invoice_lines_invoice ON cp_invoice_lines(invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_cp_vendor_messages_vendor ON cp_vendor_messages(vendor_id,sent_at);
+    CREATE INDEX IF NOT EXISTS idx_cp_vendor_messages_search ON cp_vendor_messages(search_id);
   `);
 }
 
 export function resetClearPath() {
   const db = getClearPath();
   const tx = db.transaction(() => {
-    ["cp_users","cp_clients","cp_candidates","cp_orders","cp_searches","cp_qa","cp_billing","cp_audit","cp_reports","cp_notes","cp_vendors","cp_meta"].forEach(t=>db.exec(`DELETE FROM ${t}`));
+    ["cp_invoice_lines","cp_invoices","cp_vendor_messages","cp_users","cp_clients","cp_candidates","cp_orders","cp_searches","cp_qa","cp_billing","cp_audit","cp_reports","cp_notes","cp_vendors","cp_meta"].forEach(t=>db.exec(`DELETE FROM ${t}`));
+    db.exec("DELETE FROM sqlite_sequence WHERE name IN ('cp_audit','cp_reports','cp_notes','cp_invoices','cp_invoice_lines','cp_vendor_messages')");
     const users = [
       ["admin@clearpath.local","Administrator","Morgan Ellis"],["operations@clearpath.local","Operations Specialist","Taylor Reed"],["qa@clearpath.local","QA Reviewer","Jordan Lee"],
       ["client.admin@clearpath.local","Client Administrator","Casey Martin"],["candidate@clearpath.local","Candidate","Alex Parker"],["researcher@clearpath.local","Researcher / Vendor","Jamie Ford"],
@@ -157,5 +165,56 @@ export function applyPortalAction(input:ActionRequest, actor:ActionActor) {
     const evidence={record:after,submittedFields:values,requestedEntityId};
     db.prepare("INSERT INTO cp_audit(ts,user,role,action,entity_type,entity_id,previous_value,new_value,note,source,session_id) VALUES(datetime('now'),?,?,?,?,?,?,?,?,?,?)").run(clean(actor.name,100),clean(actor.role,100),action,entityType,entityId,JSON.stringify(before),JSON.stringify(evidence),note,"Web",clean(actor.sessionId,100)||"CURRENT-DEMO");
     return {entityType,entityId,before,after};
+  })();
+}
+
+export type InvoiceLineInput={description:string;amount:number};
+export type CreateInvoiceInput={dueDate:string;note:string;lineItems:InvoiceLineInput[]};
+export function billingExceptionWithInvoices(id:number){
+  const db=getClearPath();
+  const exception=db.prepare(`SELECT b.id,b.order_id orderId,o.order_id orderNumber,c.name candidate,cl.name client,b.issue,b.status,b.vendor_cost vendorCost,b.expected_cost expectedCost,b.client_price clientPrice
+    FROM cp_billing b JOIN cp_orders o ON o.id=b.order_id JOIN cp_candidates c ON c.id=o.candidate_id JOIN cp_clients cl ON cl.id=o.client_id WHERE b.id=?`).get(id) as Row|undefined;
+  if(!exception)throw new Error("Billing exception not found");
+  const invoiceRows=db.prepare("SELECT id,invoice_number invoiceNumber,billing_id billingId,order_id orderId,due_date dueDate,note,status,total,created_by createdBy,created_at createdAt FROM cp_invoices WHERE billing_id=? ORDER BY id DESC").all(id) as Row[];
+  const lineQuery=db.prepare("SELECT id,description,amount FROM cp_invoice_lines WHERE invoice_id=? ORDER BY id");
+  return {exception,invoices:invoiceRows.map(invoice=>({...invoice,lineItems:lineQuery.all(invoice.id)}))};
+}
+export function createInvoice(billingId:number,input:CreateInvoiceInput,actor:ActionActor){
+  const db=getClearPath();
+  return db.transaction(()=>{
+    const before=db.prepare("SELECT id,order_id orderId,status,vendor_cost vendorCost,expected_cost expectedCost,client_price clientPrice,issue FROM cp_billing WHERE id=?").get(billingId) as Row|undefined;
+    if(!before)throw new Error("Billing exception not found");
+    const total=Math.round(input.lineItems.reduce((sum,item)=>sum+item.amount,0)*100)/100;
+    const result=db.prepare("INSERT INTO cp_invoices(invoice_number,billing_id,order_id,due_date,note,status,total,created_by,created_at) VALUES(NULL,?,?,?,?,?,?,?,datetime('now'))").run(billingId,before.orderId,input.dueDate,input.note,"Open",total,actor.name);
+    const invoiceId=Number(result.lastInsertRowid),invoiceNumber=`INV-${new Date().getUTCFullYear()}-${String(invoiceId).padStart(6,"0")}`;
+    db.prepare("UPDATE cp_invoices SET invoice_number=? WHERE id=?").run(invoiceNumber,invoiceId);
+    const insertLine=db.prepare("INSERT INTO cp_invoice_lines(invoice_id,description,amount) VALUES(?,?,?)");
+    input.lineItems.forEach(item=>insertLine.run(invoiceId,item.description,item.amount));
+    db.prepare("UPDATE cp_billing SET status='Invoiced' WHERE id=?").run(billingId);
+    const invoice=(billingExceptionWithInvoices(billingId).invoices as Array<Row&{lineItems:unknown[]}>).find(row=>row.id===invoiceId)!;
+    db.prepare("INSERT INTO cp_audit(ts,user,role,action,entity_type,entity_id,previous_value,new_value,note,source,session_id) VALUES(datetime('now'),?,?,?,?,?,?,?,?,?,?)").run(actor.name,actor.role,"Invoice created","Billing Exception",String(billingId),JSON.stringify(before),JSON.stringify({invoice,billingStatus:"Invoiced"}),input.note,"Web",actor.sessionId||"CURRENT-DEMO");
+    return invoice;
+  })();
+}
+
+export type CreateVendorMessageInput={subject:string;body:string;searchId?:string;followUpDate?:string};
+export function vendorWithMessages(id:number){
+  const db=getClearPath();
+  const vendor=db.prepare("SELECT id,name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact FROM cp_vendors WHERE id=?").get(id) as Row|undefined;
+  if(!vendor)throw new Error("Vendor not found");
+  const messages=db.prepare("SELECT id,vendor_id vendorId,subject,body,search_id searchId,follow_up_date followUpDate,direction,status,sent_by sentBy,sent_at sentAt FROM cp_vendor_messages WHERE vendor_id=? ORDER BY id DESC").all(id) as Row[];
+  return {vendor,messages};
+}
+export function createVendorMessage(vendorId:number,input:CreateVendorMessageInput,actor:ActionActor){
+  const db=getClearPath();
+  return db.transaction(()=>{
+    const vendor=db.prepare("SELECT id,name,status,contact FROM cp_vendors WHERE id=?").get(vendorId) as Row|undefined;
+    if(!vendor)throw new Error("Vendor not found");
+    if(vendor.status!=="Active")throw new Error("Vendor is not active");
+    if(input.searchId&&!db.prepare("SELECT 1 FROM cp_searches WHERE search_id=? AND vendor=?").get(input.searchId,vendor.name))throw new Error("Search is not assigned to this vendor");
+    const result=db.prepare("INSERT INTO cp_vendor_messages(vendor_id,subject,body,search_id,follow_up_date,direction,status,sent_by,sent_at) VALUES(?,?,?,?,?,'Outbound','Sent',?,datetime('now'))").run(vendorId,input.subject,input.body,input.searchId||null,input.followUpDate||null,actor.name);
+    const message=db.prepare("SELECT id,vendor_id vendorId,subject,body,search_id searchId,follow_up_date followUpDate,direction,status,sent_by sentBy,sent_at sentAt FROM cp_vendor_messages WHERE id=?").get(result.lastInsertRowid) as Row;
+    db.prepare("INSERT INTO cp_audit(ts,user,role,action,entity_type,entity_id,previous_value,new_value,note,source,session_id) VALUES(datetime('now'),?,?,?,?,?,?,?,?,?,?)").run(actor.name,actor.role,"Vendor message sent","Vendor",String(vendorId),"",JSON.stringify({vendor,message}),input.body,"Web",actor.sessionId||"CURRENT-DEMO");
+    return message;
   })();
 }
