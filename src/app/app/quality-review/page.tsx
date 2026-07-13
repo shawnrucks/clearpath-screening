@@ -1,2 +1,33 @@
-import {rows} from "@/lib/clearpath"; import {ActionModal,Badge,PageHead} from "@/components/Portal";
-export default function QA(){const d=rows(`SELECT q.*,o.order_id,c.name candidate,cl.name client,o.package FROM cp_qa q JOIN cp_orders o ON o.id=q.order_id JOIN cp_candidates c ON c.id=o.candidate_id JOIN cp_clients cl ON cl.id=o.client_id`);return <div className="page"><PageHead eyebrow="QUALITY CONTROL" title="Quality Review" subtitle="Final procedural review before report release."/><div className="qa-layout"><section className="card table-card"><div className="table-summary"><b>10 reports require review</b><span>2 high priority · oldest item 4 days</span></div><table><thead><tr><th>QA ID</th><th>Order / Candidate</th><th>Client</th><th>Package</th><th>Issues</th><th>Priority</th><th>Reviewer</th><th>Age</th><th>Status</th><th></th></tr></thead><tbody>{d.map(r=><tr key={String(r.qa_id)}><td><b>{r.qa_id}</b></td><td><b>{r.order_id}</b><small>{r.candidate}</small></td><td>{r.client}</td><td>{r.package}</td><td>{r.issue_count}</td><td><Badge tone={r.priority==="High"?"red":"gray"}>{r.priority}</Badge></td><td>{r.reviewer}</td><td>{r.age}d</td><td><Badge tone="purple">{r.status}</Badge></td><td><ActionModal label="Review" title="Quality Review" entity={String(r.qa_id)} fields={["Review Status","Return Reason Code"]}/></td></tr>)}</tbody></table></section><section className="card qa-check"><h2>QA Checklist</h2><p>Preview only; open a specific review to record checklist decisions.</p>{["Candidate authorization present","Required searches completed","Candidate identifiers match","Supporting documents attached","Record disposition complete","Search results entered","Client requirements met","No unresolved hold or dispute","Billing items complete","Report formatting correct"].map((x,i)=><label key={x} title="Select a QA record before editing its checklist"><input type="checkbox" checked={i<4} readOnly disabled/><span>{x}</span></label>)}<ActionModal label="Complete Review" title="Approve and Release Report" entity="Selected QA report" fields={["QA Status"]}/></section></div></div>}
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { rows } from "@/lib/clearpath";
+import QualityReviewWorkspace from "./QualityReviewWorkspace";
+
+export default async function QualityReviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ qa?: string | string[] }>;
+}) {
+  const session = verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
+  const requested = (await searchParams).qa;
+  const selectedQa = Array.isArray(requested) ? requested[0] : requested;
+  const reviews = rows(`
+    SELECT q.*, o.order_id, o.position, o.status order_status, o.target_date,
+      c.name candidate, c.email candidate_email, cl.name client, o.package,
+      (SELECT COUNT(*) FROM cp_qa_checklist_items i WHERE i.qa_id=q.id) checklist_total,
+      (SELECT COUNT(*) FROM cp_qa_checklist_items i WHERE i.qa_id=q.id AND i.completed=1) checklist_complete
+    FROM cp_qa q
+    JOIN cp_orders o ON o.id=q.order_id
+    JOIN cp_candidates c ON c.id=o.candidate_id
+    JOIN cp_clients cl ON cl.id=o.client_id
+    ORDER BY CASE q.status WHEN 'Pending Review' THEN 0 WHEN 'Additional Research' THEN 1 WHEN 'Compliance Review' THEN 2 WHEN 'Approved' THEN 3 WHEN 'Released' THEN 4 ELSE 5 END,
+      CASE q.priority WHEN 'High' THEN 0 ELSE 1 END,q.age DESC,q.id
+  `);
+  return (
+    <QualityReviewWorkspace
+      initialReviews={reviews}
+      requestedQa={selectedQa || ""}
+      role={session?.role || ""}
+    />
+  );
+}

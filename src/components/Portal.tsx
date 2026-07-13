@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+type RecordMatch = {type: "Order" | "Candidate" | "Search"; label: string; meta: string; href: string};
 const nav = [
   "Dashboard",
   "Orders",
@@ -34,20 +35,28 @@ const icons = ["▦", "▤", "☷", "♙", "⌕", "✓", "▣", "◇", "$", "▥
 export function Portal({
   children,
   user = { name: "Taylor Reed", role: "Operations Specialist" },
+  queueCount = 0,
+  notificationCounts = { overdue: 0, qa: 0, billing: 0 },
 }: {
   children: React.ReactNode;
   user?: { name: string; role: string };
+  queueCount?: number;
+  notificationCounts?: { overdue: number; qa: number; billing: number };
 }) {
   const p = usePathname(),
     r = useRouter(),
     [searchOpen, setSearchOpen] = useState(false),
     [query, setQuery] = useState(""),
+    [recordMatches, setRecordMatches] = useState<RecordMatch[]>([]),
+    [searching, setSearching] = useState(false),
     [helpOpen, setHelpOpen] = useState(false),
     [noticesOpen, setNoticesOpen] = useState(false),
     [userOpen, setUserOpen] = useState(false),
     [loggingOut, setLoggingOut] = useState(false),
     searchRef = useRef<HTMLInputElement>(null);
-  const matches = nav
+  const availableNav = nav.filter((item) => item !== "Administration" || user.role === "Administrator");
+  const unreadNotifications = Object.values(notificationCounts).filter((value) => value > 0).length;
+  const matches = availableNav
     .filter((x) => x.toLowerCase().includes(query.toLowerCase()))
     .slice(0, 6);
   useEffect(() => {
@@ -69,6 +78,31 @@ export function Portal({
   useEffect(() => {
     if (searchOpen) setTimeout(() => searchRef.current?.focus(), 0);
   }, [searchOpen]);
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) {
+      setRecordMatches([]);
+      setSearching(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const response = await fetch(`/api/clearpath/search?q=${encodeURIComponent(term)}`, {signal: controller.signal});
+        const body = await response.json().catch(() => ({results: []}));
+        if (response.ok) setRecordMatches(Array.isArray(body.results) ? body.results : []);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setRecordMatches([]);
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
   async function logout() {
     setLoggingOut(true);
     try {
@@ -93,18 +127,18 @@ export function Portal({
           </span>
         </Link>
         <nav aria-label="Operations navigation">
-          {nav.map((x, i) => (
+          {availableNav.map((x) => (
             <Link
               aria-current={p.includes(`/app/${paths[x]}`) ? "page" : undefined}
               className={p.includes(`/app/${paths[x]}`) ? "active" : ""}
               href={`/app/${paths[x]}`}
               key={x}
             >
-              <span aria-hidden="true">{icons[i]}</span>
+              <span aria-hidden="true">{icons[nav.indexOf(x)]}</span>
               {x}
               {x === "Work Queues" && (
-                <b className="nav-count" aria-label="43 open items">
-                  43
+                <b className="nav-count" aria-label={`${queueCount} priority queue items`}>
+                  {queueCount}
                 </b>
               )}
             </Link>
@@ -177,7 +211,7 @@ export function Portal({
             <kbd>⌘ K</kbd>
           </button>
           <div className="header-actions">
-            <span className="date">Sunday, July 12, 2026</span>
+            <span className="date">{new Intl.DateTimeFormat("en-US", {weekday: "long", month: "long", day: "numeric", year: "numeric"}).format(new Date())}</span>
             <button
               type="button"
               aria-label="Help and keyboard shortcuts"
@@ -191,23 +225,25 @@ export function Portal({
             </button>
             <button
               type="button"
-              aria-label="Notifications, 3 unread"
+              aria-label={`Notifications, ${unreadNotifications} unread`}
               aria-expanded={noticesOpen}
               onClick={() => {
                 setNoticesOpen((v) => !v);
                 setHelpOpen(false);
               }}
             >
-              ♢<i>3</i>
+              ♢<i>{unreadNotifications}</i>
             </button>
             {helpOpen && (
               <div className="header-popover help-popover">
                 <b>ClearPath help</b>
                 <p>
-                  Use <kbd>⌘ K</kbd> to find a workspace. Demo actions are saved
+                  Use <kbd>⌘ K</kbd> to find a record or workspace. Demo actions are saved
                   to the audit log.
                 </p>
-                <Link href="/app/admin">View demo controls →</Link>
+                <Link href={user.role === "Administrator" ? "/app/admin" : "/app/queues"}>
+                  {user.role === "Administrator" ? "View demo controls" : "Open work queues"} →
+                </Link>
               </div>
             )}
             {noticesOpen && (
@@ -216,7 +252,7 @@ export function Portal({
                 <Link href="/app/queues/overdue-searches">
                   <span className="notice-dot red"></span>
                   <span>
-                    <strong>2 overdue searches</strong>
+                    <strong>{notificationCounts.overdue} overdue searches</strong>
                     <small>Require review today</small>
                   </span>
                 </Link>
@@ -224,14 +260,14 @@ export function Portal({
                   <span className="notice-dot amber"></span>
                   <span>
                     <strong>QA queue updated</strong>
-                    <small>10 reports ready</small>
+                    <small>{notificationCounts.qa} reports ready</small>
                   </span>
                 </Link>
                 <Link href="/app/queues/billing-exceptions">
                   <span className="notice-dot blue"></span>
                   <span>
-                    <strong>Billing exception assigned</strong>
-                    <small>Meridian Community Bank</small>
+                    <strong>Billing exceptions open</strong>
+                    <small>{notificationCounts.billing} require reconciliation</small>
                   </span>
                 </Link>
               </div>
@@ -261,14 +297,16 @@ export function Portal({
                 ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type a workspace name…"
+                placeholder="Order, candidate, client, search, or workspace…"
                 aria-label="Search workspaces"
               />
               <kbd>ESC</kbd>
             </label>
             <div className="command-results">
-              {matches.length ? (
-                matches.map((x, i) => (
+              {matches.length > 0 && (
+                <div className="command-group" aria-label="Workspaces">
+                  <small>WORKSPACES</small>
+                  {matches.map((x) => (
                   <Link
                     href={`/app/${paths[x]}`}
                     key={x}
@@ -278,10 +316,24 @@ export function Portal({
                     <b>{x}</b>
                     <small>Open workspace →</small>
                   </Link>
-                ))
-              ) : (
+                  ))}
+                </div>
+              )}
+              {query.trim().length >= 2 && (
+                <div className="command-group" aria-label="Records">
+                  <small>{searching ? "SEARCHING RECORDS…" : "RECORDS"}</small>
+                  {recordMatches.map((match) => (
+                    <Link href={match.href} key={`${match.type}-${match.href}`} onClick={() => setSearchOpen(false)}>
+                      <span aria-hidden="true">{match.type === "Order" ? "▤" : match.type === "Search" ? "⌕" : "♙"}</span>
+                      <b>{match.label}</b>
+                      <small>{match.meta}</small>
+                    </Link>
+                  ))}
+                </div>
+              )}
+              {!matches.length && !recordMatches.length && !searching && (
                 <p>
-                  No workspaces match “{query}”. Try Orders, Queues, or Reports.
+                  No workspaces or records match “{query}”. Try an order ID, candidate, client, or search ID.
                 </p>
               )}
             </div>

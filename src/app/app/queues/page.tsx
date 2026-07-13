@@ -1,3 +1,64 @@
-import Link from "next/link"; import {PageHead} from "@/components/Portal";
-const qs=[["new-order-review",18,"New Order Review","Required information, package, authorization, and duplicate checks","blue"],["candidate-missing-information",6,"Candidate Missing Information","Incomplete candidate records and authorization requests","amber"],["unassigned-searches",10,"Unassigned Searches","Searches awaiting approved vendor or staff assignment","blue"],["verification-follow-up",14,"Verification Follow-Up","Employer and education outreach attempts due","purple"],["overdue-searches",8,"Overdue Searches","Searches beyond expected completion or SLA","red"],["record-review",3,"Record Review","Possible records, identifier comparisons, dispositions","red"],["reports-ready-for-qa",10,"Reports Ready for QA","Completed searches awaiting quality preparation","purple"],["reports-ready-to-release",12,"Reports Ready to Release","QA-approved reports requiring manual release","green"],["billing-exceptions",5,"Billing Exceptions","Vendor cost and client-price discrepancies","amber"]];
-export default function Queues(){return <div className="page"><PageHead eyebrow="WORK MANAGEMENT" title="Work Queues" subtitle="Operational work requiring review and manual action."/><div className="queue-summary"><div><b>86</b><span>Total open work items</span></div><div><b className="red-text">11</b><span>Urgent or overdue</span></div><div><b className="amber-text">24</b><span>Due today</span></div><div><b>43</b><span>Assigned to you</span></div></div><div className="queue-grid">{qs.map(q=><Link href={`/app/queues/${q[0]}`} className="queue-card" key={q[0]}><span className={`queue-icon ${q[4]}`}>{q[4]==="red"?"!":q[4]==="green"?"✓":"☷"}</span><div><p>{q[2]}</p><small>{q[3]}</small><b>{q[1]} <span>open items</span></b></div><i>→</i></Link>)}</div></div>}
+import Link from "next/link";
+import { PageHead } from "@/components/Portal";
+import { rows } from "@/lib/clearpath";
+
+const definitions = [
+  ["new-order-review", "New Order Review", "Validate package, authorization, and screening setup.", "▤", "blue"],
+  ["candidate-missing-information", "Candidate Missing Information", "Send candidate requests and schedule follow-up.", "♙", "amber"],
+  ["unassigned-searches", "Unassigned Searches", "Assign an approved vendor, cost, and due date.", "⌕", "blue"],
+  ["verification-follow-up", "Verification Follow-Up", "Log phone, email, and candidate-assistance attempts.", "✉", "purple"],
+  ["overdue-searches", "Overdue Searches", "Contact vendors and record a dated escalation.", "!", "red"],
+  ["record-review", "Record Review", "Document structured criminal-record match decisions.", "◇", "red"],
+  ["reports-ready-for-qa", "Reports Ready for QA", "Select the exact QA record and complete its checklist.", "✓", "purple"],
+  ["reports-ready-to-release", "Reports Ready to Release", "Review approved QA records and release reports.", "▣", "green"],
+  ["billing-exceptions", "Billing Exceptions", "Resolve corrected fees or request client approval.", "$", "amber"],
+] as const;
+
+function count(sql: string) {
+  return Number(rows(sql)[0]?.count || 0);
+}
+
+export default function QueuesPage() {
+  const counts: Record<string, number> = {
+    "new-order-review": count("SELECT COUNT(*) count FROM cp_orders WHERE id<=18"),
+    "candidate-missing-information": count("SELECT COUNT(*) count FROM cp_orders WHERE status='Candidate Action Required'"),
+    "unassigned-searches": count("SELECT COUNT(*) count FROM cp_searches WHERE vendor='Unassigned'"),
+    "verification-follow-up": count("SELECT COUNT(*) count FROM cp_searches WHERE type IN ('Employment Verification','Education Verification') AND status NOT IN ('Completed','Cancelled')"),
+    "overdue-searches": count("SELECT COUNT(*) count FROM cp_searches WHERE due_date<'2026-07-12' AND status NOT IN ('Completed','Cancelled')"),
+    "record-review": count("SELECT COUNT(*) count FROM cp_searches WHERE status='Possible Record' AND type IN ('County Criminal Search','National Criminal Database')"),
+    "reports-ready-for-qa": count("SELECT COUNT(*) count FROM cp_qa WHERE status IN ('Pending Review','Additional Research','Compliance Review')"),
+    "reports-ready-to-release": count("SELECT COUNT(*) count FROM cp_qa WHERE status='Approved'"),
+    "billing-exceptions": count("SELECT COUNT(*) count FROM cp_billing WHERE status NOT IN ('Resolved','Invoiced')"),
+  };
+  const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+  const urgent = counts["overdue-searches"] + counts["record-review"];
+
+  return (
+    <div className="page queues-workspace">
+      <PageHead
+        eyebrow="WORK MANAGEMENT"
+        title="Priority Queues"
+        subtitle="Focused operational work with explicit, auditable next actions."
+      />
+      <section className="queue-overview" aria-label="Queue summary">
+        <article><span>Open queue entries</span><strong>{total}</strong><small>Across nine workflows; an item can appear in more than one</small></article>
+        <article className="red"><span>Urgent review</span><strong>{urgent}</strong><small>Overdue or possible-record items</small></article>
+        <article className="blue"><span>Assigned workflows</span><strong>{counts["verification-follow-up"]}</strong><small>Verification attempts requiring action</small></article>
+        <article className="purple"><span>Quality review</span><strong>{counts["reports-ready-for-qa"]}</strong><small>Reports awaiting checklist decisions</small></article>
+      </section>
+      <div className="priority-queue-grid">
+        {definitions.map(([slug, title, description, icon, tone]) => (
+          <Link className={`priority-queue-card ${tone}`} href={`/app/queues/${slug}`} key={slug}>
+            <div className="priority-queue-card-head">
+              <span aria-hidden="true">{icon}</span>
+              <b>{counts[slug]}</b>
+            </div>
+            <h2>{title}</h2>
+            <p>{description}</p>
+            <div><span>{counts[slug] === 1 ? "1 open item" : `${counts[slug]} open items`}</span><strong>Open queue →</strong></div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}

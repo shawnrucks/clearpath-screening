@@ -1,29 +1,42 @@
 # ClearPath interaction audit
 
-Verified against the canonical Next.js application on port 3010.
+This file records verified behavior rather than treating visible-but-disabled controls as a passing implementation.
 
-| Area | Route/control | Operations | Administrator | Expected result |
-|---|---|---:|---:|---|
-| Dashboard | `/app/dashboard`, metrics, activity, attention links | Pass | Pass | Links reach queues, audit, reports, and orders |
-| Orders | `/app/orders`, order IDs/Open, CSV export | Pass | Pass | Details open; export downloads CSV |
-| Orders | New/search/filter/more-filter controls | Pass | Pass | Clearly disabled with demo limitation |
-| Order detail | `/app/orders/CP-2026-1001`, back link, action modals | Pass | Pass | Back navigates; actions open dialogs |
-| Order detail | Tabs/edit/add-search controls | Pass | Pass | Clearly disabled with demo limitation |
-| Queues | `/app/queues` and all nine queue cards | Pass | Pass | Each queue route returns and displays data |
-| Queue detail | Back link, row action dialogs, record decisions | Pass | Pass | Navigation/dialog controls respond |
-| Queue detail | Priority/assignee filters | Pass | Pass | Clearly disabled with demo limitation |
-| Quality | `/app/quality-review`, review dialogs | Pass | Pass | Dialogs open; preview checkboxes are read-only |
-| Records | `/app/candidates`, `/app/searches`, `/app/clients`, `/app/billing` | Pass | Pass | Data tables render |
-| Vendors | `/app/vendors`, email/contact links | Pass | Pass | Mail client link includes vendor address |
-| Vendors | Add vendor | Pass | Pass | Clearly disabled with demo limitation |
-| Reports | `/app/reports`, browse/create/details | Pass | Pass | Queue/create routes open; saved details expand |
-| Reports | `/app/reports/operations`, cancel/save | Pass | Pass | Cancel returns; valid report persists or error displays |
-| Audit | `/app/audit-log`, CSV export | Pass | Pass | CSV downloads; unsupported filters are disabled |
-| Administration | `/app/admin` | Redirect | Pass | Operations denied; Administrator receives page |
-| Administration | reset cancel/confirm | N/A | Pass | Cancel closes; confirm resets or reports error |
-| Administration | configuration/user editing | N/A | Pass | Clearly disabled with demo limitation |
-| Client portal | `/client/dashboard`, logout/support | Role denied | Role denied | Internal roles cannot cross portal boundary |
-| Candidate portal | `/candidate/dashboard`, logout/support | Role denied | Role denied | Internal roles cannot cross portal boundary |
-| Session | Logout | Pass | Pass | Session clears and protected route redirects to login |
+## Automated quality gates
 
-Client Administrator and Candidate role smoke tests additionally confirm their own dashboards render, logout works, support uses email links, and unfinished workflows are honestly disabled.
+- `npm run test:api` exercises authenticated server endpoints, validation, persistence, audit evidence, and reset behavior against the local SQLite seed.
+- `npm run test:browser` uses the installed Google Chrome against `localhost:3010`, one worker at a time.
+- Both suites reject non-local base URLs so they cannot reset or exercise production accidentally.
+- Browser coverage includes login, every sidebar route, every queue card/route, runtime console and page errors, unique enabled action types, downloads, safe modal open/cancel flows, and the release queue.
+- `tests/browser/order-quality.spec.ts` enforces working order creation/editing/tab/add-search controls plus card spacing, search-row layout, and horizontal-overflow constraints.
+- Persistence scenarios reset the local seed around every mutating case and verify the saved result after a browser reload.
+
+## Verified working behavior
+
+| Area | Verified behavior |
+|---|---|
+| Authentication | Seeded login, signed session, role boundary, logout |
+| Application shell | Sidebar destinations, workspace search dialog, help, notifications, user menu |
+| Queue routing | All nine canonical queue routes load seeded rows; release route is `/app/queues/reports-ready-to-release` |
+| Orders | Search/filter/reset, CSV export, persisted New Order creation, detail tabs, order/candidate editing, Add Search, document recording, and responsive row spacing |
+| Queue workflows | Candidate request, vendor assignment, verification attempt, overdue vendor contact, criminal review, QA approval/release, and billing resolution persist on the exact record |
+| Vendors | Vendor create/edit and in-system message history persist through reload |
+| Candidate portal | Disclosure, authorization signature, and document metadata persist through reload |
+| Client portal | Tenant-bound order submission remains visible to the same client after reload |
+| Reports | Morning operations report creation remains listed with its summary and priority actions after reload |
+| Billing | Client invoice creation remains in the exception invoice history after reload |
+| Existing action triggers | Enabled order, queue, QA, billing, vendor, report, audit, and reset triggers open/navigate/download without page errors |
+| Persistence APIs | Typed mutations, validation, role boundaries, audit evidence, and reset behavior |
+| Reset | Administrator-only transactional seed reset |
+
+## Remaining limitations found in review
+
+| Severity | Area | Current behavior |
+|---|---|---|
+| P2 | Administration | Users and configuration are review-only; the only supported write is the full demo reset |
+| P2 | Audit | The workspace loads the newest 500 events and has no pagination beyond that limit |
+| Scope | Quality gate | Browser mutation tests are intentionally restricted to localhost and do not mutate the production deployment |
+
+## Review rule
+
+A control passes only if it has a clear outcome, completes that outcome through the visible UI, persists any operational write, survives reload, and creates the required audit evidence. A disabled core-workflow control is a failure, not a pass.

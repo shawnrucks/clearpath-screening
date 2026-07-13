@@ -1,4 +1,3 @@
-import Link from "next/link";
-import {LogoutButton, UnavailableButton} from "@/app/app/PageControls";
-export default function Candidate(){return <main className="candidate-portal"><header><Link href="/" className="brand"><span className="brand-mark">CP</span>ClearPath Screening</Link><LogoutButton>Sign out</LogoutButton></header><section className="candidate-card"><BadgeLocal>SCREENING IN PROGRESS</BadgeLocal><h1>Hi Alex, let’s complete your screening.</h1><p>Northstar Health Partners has invited you to complete a background screening. Your information is encrypted and handled securely.</p><div className="steps">{["Personal Information","Address History","Disclosure Review","Authorization Signature","Document Upload"].map((x,i)=><div className={i<2?"complete":""} key={x}><span>{i<2?"✓":i+1}</span><b>{x}</b><small>{i<2?"Complete":i===2?"Ready to begin":"Not started"}</small></div>)}</div><UnavailableButton className="btn primary wide" reason="The disclosure workflow is not included in this demo">Continue Disclosure Review →</UnavailableButton><a href="mailto:candidate-support@clearpath.local">Need help? Contact Candidate Support</a></section></main>}
-function BadgeLocal({children}:{children:React.ReactNode}){return <span className="badge blue">{children}</span>}
+import CandidateWorkspace from "./CandidateWorkspace";
+
+export default function CandidateDashboard(){return <CandidateWorkspace/>}

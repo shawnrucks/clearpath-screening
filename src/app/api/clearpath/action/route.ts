@@ -37,6 +37,8 @@ export async function POST(request: NextRequest) {
     :entityId.startsWith("SRC-")?hasRole(session,[...managers,"Researcher / Vendor","Compliance Reviewer"])
     :false;
   if(!permitted)return NextResponse.json({error:"Forbidden"},{status:403});
+  if(!entityId.startsWith("CP-"))return NextResponse.json({error:"Use the dedicated record workflow for this action"},{status:400});
+  if(!["Change Order Status","Send Order to QA"].includes(action))return NextResponse.json({error:"Unsupported order action"},{status:400});
   const rawValues=body.values && typeof body.values==="object" && !Array.isArray(body.values) ? body.values as Record<string,unknown> : {};
   const values:Record<string,string>={};
   for(const [key,value] of Object.entries(rawValues)){

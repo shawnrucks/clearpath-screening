@@ -1,2 +1,22 @@
-import {rows} from "@/lib/clearpath"; import {Badge,PageHead} from "@/components/Portal"; import ResetButton from "./ResetButton"; import {UnavailableButton} from "../PageControls";
-export default function Admin(){const users=rows("SELECT * FROM cp_users");const settings=["Clients","Screening Packages","Search Products","Vendors","Queue Rules","Status Options","Reason Codes","Message Templates","Fee Thresholds","SLA Settings"];const reason="Configuration editing is intentionally disabled in this demo";return <div className="page"><PageHead eyebrow="SYSTEM CONFIGURATION" title="Administration" subtitle="Manage users, operational settings, and the complete demo dataset." actions={<ResetButton/>}/><div className="admin-layout"><section className="card"><div className="card-head"><div><h2>Users and Roles</h2><p>Durable accounts available in this demo environment</p></div><UnavailableButton className="btn outline" reason={reason}>+ Add User</UnavailableButton></div><table><thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>{users.map(r=><tr key={String(r.email)}><td><b>{r.name}</b></td><td>{r.email}</td><td><Badge tone="blue">{r.role}</Badge></td><td><Badge tone="green">Active</Badge></td><td><UnavailableButton className="table-action" reason={reason}>Edit →</UnavailableButton></td></tr>)}</tbody></table></section><aside><section className="card"><h2>Configuration</h2>{settings.map(x=><UnavailableButton className="setting-row" reason={reason} key={x}><span>⚙</span>{x}<i>→</i></UnavailableButton>)}</section><section className="card demo-panel"><span>DEMO ENVIRONMENT</span><h2>Dataset Status</h2><div><b>50</b> Orders</div><div><b>150</b> Searches</div><div><b>112</b> Audit events</div><p>Seed version 2026.07.12<br/>SQLite server-side persistence</p></section></aside></div></div>}
+import {Badge,PageHead} from "@/components/Portal";
+import {rows} from "@/lib/clearpath";
+import ResetButton from "./ResetButton";
+
+function count(table:string){return Number(rows(`SELECT COUNT(*) count FROM ${table}`)[0]?.count??0);}
+
+export default function Administration(){
+  const users=rows("SELECT id,name,email,role FROM cp_users ORDER BY role,name");
+  const settings=[
+    ["Clients",`${count("cp_clients")} active employer accounts`],
+    ["Screening Packages","Basic, Standard, Professional, Healthcare"],
+    ["Search Products","Nine configured screening products"],
+    ["Vendors",`${count("cp_vendors")} approved research partners`],
+    ["Queue Rules","Nine manual operational queues"],
+    ["Status Options","Order, search, QA, and billing states"],
+    ["Reason Codes","QA returns and workflow exceptions"],
+    ["Message Templates",`${(()=>{try{return count("cp_message_templates")}catch{return 0}})()} candidate/client templates`],
+    ["Fee Thresholds","Routine and approval-required billing paths"],
+    ["SLA Settings","Due dates and aging thresholds"],
+  ];
+  return <div className="page"><PageHead eyebrow="SYSTEM CONFIGURATION" title="Administration" subtitle="Review seeded operational configuration and restore the complete demo dataset." actions={<ResetButton/>}/><div className="admin-layout"><section className="card table-card"><div className="card-head"><div><h2>Users and Roles</h2><p>Durable accounts available in this environment</p></div><Badge tone="green">{users.length} active</Badge></div><table><thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>{users.map(user=><tr key={String(user.email)}><td><b>{user.name}</b></td><td>{user.email}</td><td><Badge tone="blue">{user.role}</Badge></td><td><Badge tone="green">Active</Badge></td></tr>)}</tbody></table></section><aside><section className="card admin-config"><div className="card-head"><div><h2>Configuration Registry</h2><p>Seeded controls used by the operational workflows</p></div></div>{settings.map(setting=><div className="setting-row" key={setting[0]}><span aria-hidden="true">⚙</span><div><b>{setting[0]}</b><small>{setting[1]}</small></div><Badge tone="gray">Configured</Badge></div>)}</section><section className="card demo-panel"><span>DEMO ENVIRONMENT</span><h2>Dataset Status</h2><div><b>{count("cp_orders")}</b> Orders</div><div><b>{count("cp_searches")}</b> Searches</div><div><b>{count("cp_audit")}</b> Audit events</div><p>Seed version 2026.07.12<br/>SQLite server-side persistence</p></section></aside></div></div>;
+}

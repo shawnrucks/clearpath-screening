@@ -7,7 +7,9 @@
     "build": "next build --webpack",
     "start": "next start -p ${PORT:-3010}",
     "typecheck": "tsc --noEmit --pretty false",
-    "test:e2e": "node tests/backend-e2e.mjs",
+    "test:api": "node tests/backend-e2e.mjs",
+    "test:browser": "playwright test",
+    "test:e2e": "npm run test:api && npm run test:browser",
     "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
@@ -17,6 +19,7 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/better-sqlite3": "^7.6.9",
     "@types/node": "^20",
     "@types/react": "^19",

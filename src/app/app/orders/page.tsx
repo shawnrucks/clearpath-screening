@@ -1,2 +1,38 @@
-import Link from "next/link"; import {rows} from "@/lib/clearpath"; import {Badge,PageHead} from "@/components/Portal"; import {ExportCsvButton,UnavailableButton} from "../PageControls";
-export default function Orders(){const data=rows(`SELECT o.*,c.name candidate,cl.name client FROM cp_orders o JOIN cp_candidates c ON c.id=o.candidate_id JOIN cp_clients cl ON cl.id=o.client_id ORDER BY o.id LIMIT 30`);const reason="Order creation is not enabled in this read-only demo";return <div className="page"><PageHead eyebrow="SCREENING OPERATIONS" title="Orders" subtitle="Review, assign, and manage screening orders." actions={<UnavailableButton className="btn primary" reason={reason}>+ New Order</UnavailableButton>}/><div className="filters"><div>⌕ <input placeholder="Search is not enabled in this demo" disabled title="Order search is not enabled in this demo"/></div>{["All Statuses","All Packages","All Assignees","Order Date"].map(x=><select key={x} disabled title="Filtering is not enabled in this demo"><option>{x}</option></select>)}<UnavailableButton reason="Additional filters are not enabled in this demo">More filters</UnavailableButton></div><section className="card table-card"><div className="table-summary"><b>50 orders</b><span>18 in progress · 10 quality review · 12 complete</span><ExportCsvButton rows={data} filename="clearpath-orders.csv" className=""/></div><table><thead><tr><th>Order ID</th><th>Candidate</th><th>Client / Position</th><th>Package</th><th>Order Date</th><th>Target Completion</th><th>Status</th><th>Assigned To</th><th>Aging</th><th></th></tr></thead><tbody>{data.map(r=><tr key={String(r.order_id)}><td><Link href={`/app/orders/${r.order_id}`}><b className="link-blue">{r.order_id}</b></Link></td><td><b>{r.candidate}</b></td><td><b>{r.client}</b><small>{r.position}</small></td><td>{r.package}</td><td>{r.order_date}</td><td>{r.target_date}</td><td><Badge tone={r.status==="Complete"?"green":String(r.status).includes("Action")?"amber":r.status==="Quality Review"?"purple":"blue"}>{r.status}</Badge></td><td>{r.assigned_to}</td><td className={Number(r.aging)>5?"red-text":""}>{r.aging} days</td><td><Link className="table-action" href={`/app/orders/${r.order_id}`}>Open →</Link></td></tr>)}</tbody></table></section></div>}
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { rows } from "@/lib/clearpath";
+import OrdersWorkspace from "./OrdersWorkspace";
+
+export default async function OrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ client?: string | string[] }>;
+}) {
+  const session = verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
+  const requestedClient = (await searchParams).client;
+  const initialQuery = Array.isArray(requestedClient) ? requestedClient[0] : requestedClient || "";
+  const orders = rows(`
+    SELECT o.*, c.name AS candidate, c.email AS candidate_email,
+      cl.name AS client, cl.industry AS client_industry
+    FROM cp_orders o
+    JOIN cp_candidates c ON c.id = o.candidate_id
+    JOIN cp_clients cl ON cl.id = o.client_id
+    ORDER BY o.id DESC
+  `);
+  const clients = rows(
+    "SELECT id, name, industry FROM cp_clients WHERE status='Active' ORDER BY name",
+  );
+  const assignees = rows(
+    "SELECT name, role FROM cp_users WHERE role IN ('Operations Specialist','Researcher / Vendor','Administrator') ORDER BY name",
+  );
+
+  return (
+    <OrdersWorkspace
+      initialOrders={orders}
+      clients={clients}
+      assignees={assignees}
+      role={session?.role || ""}
+      initialQuery={initialQuery}
+    />
+  );
+}

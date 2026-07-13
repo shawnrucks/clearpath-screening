@@ -1,2 +1,116 @@
-import Link from "next/link"; import {notFound} from "next/navigation"; import {rows} from "@/lib/clearpath"; import {ActionModal,Badge} from "@/components/Portal"; import {UnavailableButton} from "../../PageControls";
-export default async function OrderDetail({params}:{params:Promise<{id:string}>}){const {id}=await params;const order=rows(`SELECT o.*,c.name candidate,c.dob,c.ssn,c.email,c.phone,c.address,c.previous_address,c.aliases,cl.name client FROM cp_orders o JOIN cp_candidates c ON c.id=o.candidate_id JOIN cp_clients cl ON cl.id=o.client_id WHERE o.order_id=?`,id)[0];if(!order)notFound();const searches=rows("SELECT * FROM cp_searches WHERE order_id=?",order.id);const disabledReason="Editing this field is not enabled in the demo";return <div className="page"><div className="record-head"><div><Link href="/app/orders">← Back to Orders</Link><div><h1>{order.candidate}</h1><Badge tone="blue">{order.status}</Badge></div><p>{order.order_id} · {order.client} · {order.position}</p></div><div className="record-actions"><ActionModal label="Add Note" title="Add Internal Note" entity={id}/><ActionModal label="Change Status" title="Change Order Status" entity={id} fields={["New Status"]}/><ActionModal label="Send to QA" title="Send Order to QA" entity={id} fields={["Assigned Reviewer"]}/></div></div><div className="tabs"><button className="active">Overview</button>{["Searches","Candidate Information","Documents","Communications","Notes","Billing","Audit History"].map(x=><UnavailableButton reason={`${x} is summarized on this demo overview`} key={x}>{x}{x==="Searches"&&<span>{searches.length}</span>}</UnavailableButton>)}</div><div className="record-grid"><div><section className="card"><div className="card-head"><h2>Order Overview</h2><UnavailableButton reason={disabledReason}>Edit</UnavailableButton></div><div className="detail-grid">{[["Client",order.client],["Position",order.position],["Screening Package",order.package],["Hiring Location","Denver, CO"],["Order Date",order.order_date],["Target Completion",order.target_date],["Assigned To",order.assigned_to],["Recruiter","Alyssa Moore"]].map(x=><div key={String(x[0])}><small>{x[0]}</small><b>{x[1]}</b></div>)}</div></section><section className="card"><div className="card-head"><div><h2>Screening Searches</h2><p>{searches.filter(x=>x.status==="Completed").length} of {searches.length} completed</p></div><UnavailableButton className="btn outline" reason="Adding searches is not enabled in the demo">+ Add Search</UnavailableButton></div><div className="search-list">{searches.map(s=><div key={String(s.search_id)}><span className={s.status==="Completed"?"done":"searching"}>{s.status==="Completed"?"✓":"⌕"}</span><div><b>{s.type}</b><small>{s.search_id} · {s.jurisdiction}</small></div><div><Badge tone={s.status==="Completed"?"green":s.status==="Possible Record"?"red":"blue"}>{s.status}</Badge><small>Due {s.due_date}</small></div><ActionModal title="Update Search" entity={String(s.search_id)} fields={["Current Status","Expected Completion Date"]}/></div>)}</div></section></div><aside className="record-side"><section className="card"><div className="card-head"><h2>Candidate Information</h2><UnavailableButton reason={disabledReason}>Edit</UnavailableButton></div><div className="candidate-info"><div className="avatar">{String(order.candidate).split(" ").map(x=>x[0]).join("")}</div><h3>{order.candidate}</h3><p>{order.email}<br/>{order.phone}</p>{[["Date of Birth",order.dob],["SSN",order.ssn],["Current Address",order.address],["Previous Address",order.previous_address],["Aliases",order.aliases]].map(x=><div key={String(x[0])}><small>{x[0]}</small><b>{x[1]}</b></div>)}</div></section><section className="card"><h2>Order Health</h2><div className="health"><span><b>67%</b><small>Complete</small></span><progress value="67" max="100"/><p>2 searches still in progress<br/>Target completion: {order.target_date}</p></div></section></aside></div></div>}
+import { cookies } from "next/headers";
+import { notFound } from "next/navigation";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { rows } from "@/lib/clearpath";
+import OrderDetailWorkspace, { type OrderTab } from "./OrderDetailWorkspace";
+
+const tabs = new Set<OrderTab>([
+  "overview",
+  "searches",
+  "candidate",
+  "documents",
+  "communications",
+  "notes",
+  "billing",
+  "audit",
+]);
+
+function optionalRows(sql: string, ...args: unknown[]) {
+  try {
+    return rows(sql, ...args);
+  } catch {
+    return [];
+  }
+}
+
+export default async function OrderDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string | string[] }>;
+}) {
+  const { id } = await params;
+  const session = verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value);
+  const requestedTab = (await searchParams).tab;
+  const tabValue = Array.isArray(requestedTab) ? requestedTab[0] : requestedTab;
+  const activeTab = tabs.has(tabValue as OrderTab)
+    ? (tabValue as OrderTab)
+    : "overview";
+  const order = rows(
+    `SELECT o.*, c.name AS candidate, c.dob, c.ssn, c.email, c.phone,
+      c.address, c.previous_address, c.aliases,
+      cl.name AS client, cl.industry AS client_industry
+    FROM cp_orders o
+    JOIN cp_candidates c ON c.id=o.candidate_id
+    JOIN cp_clients cl ON cl.id=o.client_id
+    WHERE o.order_id=?`,
+    id,
+  )[0];
+  if (!order) notFound();
+
+  const searches = rows(
+    "SELECT * FROM cp_searches WHERE order_id=? ORDER BY id",
+    order.id,
+  );
+  const notes = rows(
+    "SELECT * FROM cp_notes WHERE entity_type='Order' AND entity_id=? ORDER BY id DESC",
+    id,
+  );
+  const communications = optionalRows(
+    "SELECT * FROM cp_communications WHERE order_id IN (?,?) ORDER BY id DESC",
+    order.id,
+    id,
+  );
+  const documents = optionalRows(
+    "SELECT * FROM cp_documents WHERE order_id IN (?,?) ORDER BY id DESC",
+    order.id,
+    id,
+  );
+  const billing = rows(
+    `SELECT b.*, s.search_id, s.type AS search_type
+     FROM cp_billing b
+     LEFT JOIN cp_searches s ON s.id=b.search_id
+     WHERE b.order_id=? ORDER BY b.id DESC`,
+    order.id,
+  );
+  const audit = rows(
+    `SELECT * FROM cp_audit
+     WHERE entity_id=? OR entity_id IN (
+       SELECT search_id FROM cp_searches WHERE order_id=?
+     )
+     ORDER BY id DESC LIMIT 100`,
+    id,
+    order.id,
+  );
+  const clients = rows(
+    "SELECT id,name,industry FROM cp_clients WHERE status='Active' ORDER BY name",
+  );
+  const assignees = rows(
+    "SELECT name,role FROM cp_users WHERE role IN ('Operations Specialist','Researcher / Vendor','Administrator') ORDER BY name",
+  );
+  const reviewers = rows(
+    "SELECT name,role FROM cp_users WHERE role IN ('QA Reviewer','Administrator') ORDER BY name",
+  );
+  const vendors = rows(
+    "SELECT id,name,coverage FROM cp_vendors WHERE status='Active' ORDER BY name",
+  );
+
+  return (
+    <OrderDetailWorkspace
+      order={order}
+      searches={searches}
+      notes={notes}
+      communications={communications}
+      documents={documents}
+      billing={billing}
+      audit={audit}
+      clients={clients}
+      assignees={assignees}
+      reviewers={reviewers}
+      vendors={vendors}
+      activeTab={activeTab}
+      role={session?.role || ""}
+    />
+  );
+}
