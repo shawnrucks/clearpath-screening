@@ -43,7 +43,8 @@ try{
   await expectStatus("/api/clearpath/login",401,{method:"POST",body:{email:"operations@clearpath.local",password:"wrong",role:"Operations Specialist"}});
 
   for(const [key,email,role] of users)sessions[key]=await login(email,role);
-  await expectStatus("/api/demo/reset",200,{method:"POST",cookie:sessions.admin,body:{}});
+  const resetConfirmation={confirmation:"RESTORE_CLEARPATH_DEMO"};
+  await expectStatus("/api/demo/reset",200,{method:"POST",cookie:sessions.admin,body:resetConfirmation});
 
   for(const key of ["admin","operations","qa","researcher","billing","compliance"]){
     const {data}=await expectStatus("/api/clearpath/queue?slug=overdue-searches",200,{cookie:sessions[key]});
@@ -245,12 +246,30 @@ try{
   await expectStatus("/api/clearpath/vendors/2/messages",403,{cookie:sessions.client});
   await expectStatus("/api/clearpath/vendors/2/messages",400,{method:"POST",cookie:sessions.operations,body:{subject:"Mismatch",body:"Wrong vendor",searchId:"SRC-5002"}});
   await expectStatus("/api/clearpath/vendors/999/messages",404,{cookie:sessions.operations});
-  await expectStatus("/api/demo/reset",403,{method:"POST",cookie:sessions.operations,body:{}});
+  const resetMarker=()=>Number(db.prepare("SELECT count(*) count FROM cp_reports WHERE title='E2E Operations Report'").get().count);
+  assert.equal(resetMarker(),1);assertions++;
+  await expectStatus("/api/demo/reset",401,{method:"POST",body:resetConfirmation});
+  assert.equal(resetMarker(),1);assertions++;
+  await expectStatus("/api/demo/reset",400,{method:"POST",cookie:sessions.admin,body:{}});
+  assert.equal(resetMarker(),1);assertions++;
+  await expectStatus("/api/demo/reset",403,{method:"POST",cookie:sessions.admin,requestOrigin:"https://evil.example",body:resetConfirmation});
+  assert.equal(resetMarker(),1);assertions++;
+  await expectStatus("/api/demo/reset",403,{method:"POST",cookie:sessions.admin,requestOrigin:null,extraHeaders:{"sec-fetch-site":"cross-site"},body:resetConfirmation});
+  assert.equal(resetMarker(),1);assertions++;
+  for(const key of ["qa","client","candidate","researcher","billing","compliance"]){
+    await expectStatus("/api/demo/reset",403,{method:"POST",cookie:sessions[key],body:resetConfirmation});
+    assert.equal(resetMarker(),1);assertions++;
+  }
+  await expectStatus("/api/demo/reset",405,{cookie:sessions.admin});
+  await expectStatus("/api/demo/reset",405,{method:"PUT",cookie:sessions.admin,body:resetConfirmation});
+  assert.equal(resetMarker(),1);assertions++;
 
   const logout=await expectStatus("/api/clearpath/logout",200,{method:"POST",cookie:sessions.operations,body:{}});
   check(/cp_session=;/.test(logout.response.headers.get("set-cookie")||""),"logout must clear session cookie");
   await expectStatus("/api/clearpath/queue?slug=overdue-searches",401);
-  await expectStatus("/api/demo/reset",200,{method:"POST",cookie:sessions.admin,body:{}});
+  const restored=await expectStatus("/api/demo/reset",200,{method:"POST",cookie:sessions.operations,body:resetConfirmation});
+  assert.deepEqual(restored.data.counts,{orders:50,searches:150,users:8});assertions++;
+  assert.equal(restored.data.seedVersion,"2026.07.12.2");assertions++;
   assert.equal(db.prepare("SELECT count(*) count FROM cp_audit").get().count,112);assertions++;
   assert.equal(db.prepare("SELECT count(*) count FROM cp_reports").get().count,0);assertions++;
   assert.equal(db.prepare("SELECT count(*) count FROM cp_notes").get().count,0);assertions++;

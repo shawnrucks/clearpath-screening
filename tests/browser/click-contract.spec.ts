@@ -53,6 +53,56 @@ test.describe("safe click contracts", () => {
     runtime.expectClean();
   });
 
+  test("reseed confirmation, failure recovery, and keyboard focus remain safe", async ({
+    page,
+  }) => {
+    await page.goto("/app/dashboard");
+    const trigger = page.getByRole("button", {name: "Reseed demo data"});
+    await trigger.click();
+    const dialog = page.getByRole("dialog", {name: "Reseed the shared demo environment?"});
+    const confirm = dialog.getByRole("button", {name: "Reseed Demo Data"});
+    const cancel = dialog.getByRole("button", {name: "Keep Current Data"});
+    await expect(confirm).toBeDisabled();
+    expect((await cancel.boundingBox())?.width).toBeGreaterThanOrEqual(138);
+    expect((await confirm.boundingBox())?.width).toBeGreaterThanOrEqual(138);
+    await cancel.click();
+    await expect(trigger).toBeFocused();
+
+    await page.route("**/api/demo/reset", async (route) => {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({error: "A demo data restoration is already running."}),
+      });
+    });
+    await trigger.click();
+    await dialog
+      .getByLabel("I understand that all changes in the shared demo will be replaced.")
+      .check();
+    await confirm.click();
+    const alert = dialog.getByRole("alert");
+    await expect(alert).toContainText("Another reseed is already running");
+    await expect(alert).toBeFocused();
+    await expect(confirm).toBeEnabled();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await page.unroute("**/api/demo/reset");
+
+    await page.setViewportSize({width: 390, height: 844});
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toHaveAttribute("class", /demo-reset-header/);
+    await trigger.click();
+    const mobileCancel = dialog.getByRole("button", {name: "Keep Current Data"});
+    const mobileConfirm = dialog.getByRole("button", {name: "Reseed Demo Data"});
+    const mobileCancelBox = await mobileCancel.boundingBox();
+    const mobileConfirmBox = await mobileConfirm.boundingBox();
+    expect(mobileCancelBox?.width).toBeGreaterThan(300);
+    expect(mobileConfirmBox?.width).toBeGreaterThan(300);
+    expect(mobileConfirmBox!.y).toBeGreaterThan(mobileCancelBox!.y);
+    await mobileCancel.click();
+  });
+
   test("orders export and every enabled order action type responds", async ({
     page,
   }) => {
@@ -162,9 +212,9 @@ test.describe("safe click contracts", () => {
     expect(auditDownload.suggestedFilename()).toBe("clearpath-audit-log.csv");
 
     await page.goto("/app/admin");
-    await page.getByRole("button", {name: "↻ Reset Demo Data"}).click();
-    await expect(page.getByRole("dialog", {name: "Reset Demo Data?"})).toBeVisible();
-    await page.getByRole("button", {name: "Cancel"}).click();
+    await page.getByRole("button", {name: "↻ Reseed demo data…"}).click();
+    await expect(page.getByRole("dialog", {name: "Reseed the shared demo environment?"})).toBeVisible();
+    await page.getByRole("button", {name: "Keep Current Data"}).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     runtime.expectClean();
   });

@@ -33,7 +33,7 @@ async function resetLocalSeed(page: Page) {
   expect(sessionCookie).toBeTruthy();
   const reset = await page.request.post("/api/demo/reset", {
     headers: {origin, cookie: sessionCookie!},
-    data: {},
+    data: {confirmation: "RESTORE_CLEARPATH_DEMO"},
   });
   expect(reset.ok()).toBeTruthy();
   await page.context().clearCookies();

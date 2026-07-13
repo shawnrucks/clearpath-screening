@@ -1294,6 +1294,74 @@ tbody tr:hover {
   opacity: 0.65;
   pointer-events: none;
 }
+.reset-modal .warning-icon {
+  align-items: center;
+  background: #fff3e1;
+  border-radius: 50%;
+  color: #b56819;
+  display: flex;
+  font-size: 23px;
+  height: 48px;
+  justify-content: center;
+  margin-bottom: 15px;
+  width: 48px;
+}
+.reset-modal h2 {
+  font-size: 22px;
+  margin: 4px 0 8px;
+}
+.reset-modal > p:not(.kicker):not(.form-error):not(.resetting) {
+  color: var(--muted);
+  line-height: 1.55;
+}
+.reset-impact {
+  background: #fff8eb;
+  border: 1px solid #f0d6ad;
+  border-radius: 6px;
+  color: #76501e;
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 16px;
+  padding: 11px 13px;
+}
+.reset-modal .reset-confirmation {
+  align-items: flex-start;
+  background: #f7fafb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: row;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 10px;
+  line-height: 1.45;
+  margin-top: 12px;
+  padding: 12px;
+}
+.reset-modal .modal-actions .btn {
+  border-radius: 5px;
+  height: 38px;
+  min-width: 138px;
+  padding: 0 15px;
+  width: auto;
+}
+.reset-confirmation input {
+  flex: 0 0 auto;
+  height: 16px;
+  margin-top: 0;
+  min-height: 0;
+  width: 16px;
+}
+.reset-toast {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.reset-toast span {
+  font-size: 10px;
+  opacity: 0.9;
+}
 .modal-bg {
   align-items: center;
   background: rgba(5, 22, 35, 0.62);
@@ -2995,6 +3063,25 @@ button:disabled {
   border-top: 1px solid var(--border);
   color: var(--red);
 }
+.header-actions .demo-reset-header {
+  align-items: center;
+  background: #fff8eb;
+  border-color: #e7c68f;
+  border-radius: 5px;
+  color: #8a5818;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  width: auto;
+}
+.header-actions .demo-reset-header:hover,
+.header-actions .demo-reset-header:focus-visible {
+  background: #ffefd3;
+  border-color: #d3a45b;
+}
 .global-search {
   background: #fff;
   gap: 8px;
@@ -3191,6 +3278,25 @@ button:disabled {
     left: 84px;
     right: 10px;
     width: auto;
+  }
+  .reset-modal .modal-actions {
+    flex-direction: column;
+  }
+  .reset-modal .modal-actions .btn {
+    width: 100%;
+  }
+  .reset-toast {
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+  }
+  .header-actions .demo-reset-header {
+    justify-content: center;
+    padding: 0;
+    width: 34px;
+  }
+  .demo-reset-header > span:last-child {
+    display: none;
   }
 }
 

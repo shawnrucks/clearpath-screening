@@ -29,7 +29,7 @@ async function resetLocalSeed(page: Page) {
   expect(sessionCookie).toBeTruthy();
   const reset = await page.request.post("/api/demo/reset", {
     headers: {origin, cookie: sessionCookie!},
-    data: {},
+    data: {confirmation: "RESTORE_CLEARPATH_DEMO"},
   });
   expect(reset.ok()).toBeTruthy();
   await page.context().clearCookies();
@@ -448,11 +448,11 @@ test.describe("priority workflow persistence", () => {
     runtime.expectClean();
   });
 
-  test("administrator reset removes workflow changes and restores the seed", async ({
+  test("operations reset control removes workflow changes and restores the seed", async ({
     page,
   }) => {
     const runtime = captureRuntimeErrors(page);
-    await startWorkflow(page, "Administrator");
+    await startWorkflow(page, "Operations Specialist");
     await page.goto("/app/queues/candidate-missing-information");
 
     const row = firstDesktopRow(page);
@@ -469,11 +469,15 @@ test.describe("priority workflow persistence", () => {
 
     await page.goto(`/app/orders/${orderId}?tab=communications`);
     await expect(page.getByText("Additional screening information needed")).toBeVisible();
-    await page.goto("/app/admin");
-    await page.getByRole("button", {name: "↻ Reset Demo Data"}).click();
-    await page.getByRole("button", {name: "Reset Everything"}).click();
+    await page.goto("/app/dashboard");
+    await page.getByRole("button", {name: "Reseed demo data"}).click();
+    await page.getByLabel("I understand that all changes in the shared demo will be replaced.").check();
+    await page
+      .getByRole("dialog", {name: "Reseed the shared demo environment?"})
+      .getByRole("button", {name: "Reseed Demo Data", exact: true})
+      .click();
     await expect(page.getByRole("status")).toContainText(
-      "ClearPath demo data has been fully restored",
+      "50 orders · 150 searches · 8 users · seed 2026.07.12.2",
     );
 
     await page.goto(`/app/orders/${orderId}?tab=communications`);

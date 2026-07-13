@@ -5,7 +5,8 @@ import path from "path";
 
 export type Row = Record<string, string | number | null>;
 let instance: Database.Database | null = null;
-const CLEARPATH_SEED_VERSION="2026.07.12.2";
+export const CLEARPATH_SEED_VERSION="2026.07.12.2";
+export type ClearPathSeedSummary = {orders:number; searches:number; users:number};
 const configuredDbPath = process.env.CLEARPATH_DB_PATH?.trim();
 const dbPath = configuredDbPath
   ? path.resolve(configuredDbPath)
@@ -99,7 +100,7 @@ function schema(db: Database.Database) {
   db.exec("UPDATE cp_orders SET hiring_location=COALESCE(NULLIF(hiring_location,''),'Denver, CO'),recruiter=COALESCE(NULLIF(recruiter,''),'Alyssa Moore'),updated_at=COALESCE(NULLIF(updated_at,''),order_date || ' 08:00:00')");
 }
 
-export function resetClearPath() {
+export function resetClearPath(): ClearPathSeedSummary {
   const db = getClearPath();
   const tx = db.transaction(() => {
     ["cp_invoice_lines","cp_invoices","cp_vendor_messages","cp_communications","cp_documents","cp_verification_attempts","cp_qa_checklist_items","cp_criminal_match_reviews","cp_billing_approval_requests","cp_disputes","cp_message_templates","cp_candidate_progress","cp_users","cp_clients","cp_candidates","cp_orders","cp_searches","cp_qa","cp_billing","cp_audit","cp_reports","cp_notes","cp_vendors","cp_meta"].forEach(t=>db.exec(`DELETE FROM ${t}`));
@@ -158,7 +159,12 @@ export function resetClearPath() {
     const actions=["Status changed","Candidate reminder sent","Vendor assigned","Court fee added","Search sent to QA","QA checklist reviewed","Follow-up date updated","Note added"];
     for(let i=0;i<112;i++) audit.run(`2026-07-${String(1+i%12).padStart(2,"0")} ${String(8+i%9).padStart(2,"0")}:${String(i%60).padStart(2,"0")}:00`,users[i%8][2],users[i%8][1],actions[i%8],i%2?"Order":"Search",i%2?`CP-2026-${1001+i%50}`:`SRC-${5001+i%150}`,"Pending",i%3?"In Progress":"Completed","Seeded operational activity","Web",`DEMO-${100+i%9}`);
     db.prepare("INSERT INTO cp_meta(key,value) VALUES('seed_version',?)").run(CLEARPATH_SEED_VERSION);
-  }); tx();
+    const counts=db.prepare(`SELECT
+      (SELECT COUNT(*) FROM cp_orders) orders,
+      (SELECT COUNT(*) FROM cp_searches) searches,
+      (SELECT COUNT(*) FROM cp_users) users`).get() as ClearPathSeedSummary;
+    return {orders:Number(counts.orders),searches:Number(counts.searches),users:Number(counts.users)};
+  }); return tx();
 }
 
 export function getClearPath(){ if(instance) return instance; fs.mkdirSync(path.dirname(dbPath),{recursive:true}); instance=new Database(dbPath); schema(instance); const row=instance.prepare("SELECT COUNT(*) c FROM cp_orders").get() as {c:number},seed=instance.prepare("SELECT value FROM cp_meta WHERE key='seed_version'").get() as {value:string}|undefined; if(!row.c||seed?.value!==CLEARPATH_SEED_VERSION) resetClearPath(); const legacy=instance.prepare("SELECT id,password FROM cp_users WHERE password NOT LIKE 'scrypt$%'").all() as {id:number,password:string}[]; const upgrade=instance.prepare("UPDATE cp_users SET password=? WHERE id=?"); instance.transaction(()=>legacy.forEach(user=>upgrade.run(hashPassword(user.password),user.id)))(); return instance; }

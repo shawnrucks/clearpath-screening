@@ -3,6 +3,7 @@ import {redirect} from "next/navigation";
 import {INTERNAL_ROLES, SESSION_COOKIE, hasRole, verifySessionToken} from "@/lib/auth";
 import {Portal} from "@/components/Portal";
 import {rows} from "@/lib/clearpath";
+import {DEMO_RESET_ROLES, isDemoResetEnabled} from "@/lib/demo";
 
 export default async function AppLayout({children}: {children: React.ReactNode}) {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
@@ -16,5 +17,6 @@ export default async function AppLayout({children}: {children: React.ReactNode})
     (SELECT COUNT(*) FROM cp_billing WHERE status NOT IN ('Resolved','Invoiced')) billing`)[0] || {};
   const notificationCounts={overdue:Number(counts.overdue||0),qa:Number(counts.qa||0),billing:Number(counts.billing||0)};
   const queueCount=Number(counts.candidate||0)+Number(counts.unassigned||0)+notificationCounts.overdue+notificationCounts.qa+notificationCounts.billing;
-  return <Portal user={{name: session!.name, role: session!.role}} queueCount={queueCount} notificationCounts={notificationCounts}>{children}</Portal>;
+  const canResetDemoData = isDemoResetEnabled() && hasRole(session, DEMO_RESET_ROLES);
+  return <Portal user={{name: session!.name, role: session!.role}} queueCount={queueCount} notificationCounts={notificationCounts} canResetDemoData={canResetDemoData}>{children}</Portal>;
 }

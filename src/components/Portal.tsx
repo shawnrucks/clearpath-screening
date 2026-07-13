@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import DemoDataReset from "@/components/DemoDataReset";
 type RecordMatch = {type: "Order" | "Candidate" | "Search"; label: string; meta: string; href: string};
 const nav = [
   "Dashboard",
@@ -37,11 +38,13 @@ export function Portal({
   user = { name: "Taylor Reed", role: "Operations Specialist" },
   queueCount = 0,
   notificationCounts = { overdue: 0, qa: 0, billing: 0 },
+  canResetDemoData = false,
 }: {
   children: React.ReactNode;
   user?: { name: string; role: string };
   queueCount?: number;
   notificationCounts?: { overdue: number; qa: number; billing: number };
+  canResetDemoData?: boolean;
 }) {
   const p = usePathname(),
     r = useRouter(),
@@ -211,6 +214,7 @@ export function Portal({
             <kbd>⌘ K</kbd>
           </button>
           <div className="header-actions">
+            {canResetDemoData && <DemoDataReset variant="header" />}
             <span className="date">{new Intl.DateTimeFormat("en-US", {weekday: "long", month: "long", day: "numeric", year: "numeric"}).format(new Date())}</span>
             <button
               type="button"
