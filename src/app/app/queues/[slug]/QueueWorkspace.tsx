@@ -416,7 +416,7 @@ function QueueActionDialog({ slug, item, vendors, templates, close, completed }:
         </>}
 
         {slug === "overdue-searches" && <>
-          <div className="queue-vendor-recipient"><small>Recipient</small><strong>{text(item.vendor)}</strong><span>{text(item.vendor_contact) || "Active vendor contact"} · Stored in the vendor communication history</span></div>
+          <div className="queue-vendor-recipient"><small>Recipient</small><strong>{text(item.vendor)}</strong><span>{text(item.vendor_contact) || "Active vendor contact"}{text(item.vendor_phone) ? ` · ${text(item.vendor_phone)}` : ""} · Stored in the vendor communication history</span></div>
           <label>Subject<input required value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
           <label>Message<textarea required value={body} onChange={(event) => setBody(event.target.value)} /></label>
           <label>Follow-up date<input required type="date" value={followUpDate} onChange={(event) => setFollowUpDate(event.target.value)} /></label>

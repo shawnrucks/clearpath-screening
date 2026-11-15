@@ -26,6 +26,20 @@ const vendors = [
   ["VerifyNow Employment Services","Employment","Nationwide","2.6 days",24,92,1], ["Academic Records Direct","Education","Nationwide","3.1 days",29,91,1],
   ["Precision Drug Testing","Drug screening","Nationwide","1.2 days",38,95,0], ["Federal Search Partners","Federal criminal","Nationwide","2.0 days",31,97,1]
 ];
+/**
+ * Each made-up vendor's phone. All are in 555-0100..0199, the range set aside for fiction, so none of them
+ * reaches a real line. A test calling round matches vendors by name and rings its own test line instead.
+ */
+export const VENDOR_TEST_PHONES:Record<string,string>={
+  "Metro Court Research":"(720) 555-0101","National Records Network":"(720) 555-0102","VerifyNow Employment Services":"(720) 555-0103",
+  "Academic Records Direct":"(720) 555-0104","Precision Drug Testing":"(720) 555-0105","Federal Search Partners":"(720) 555-0106"
+};
+/** A US phone number as (NXX) NXX-XXXX, from 10 digits or 11 starting with 1; null when it is not one. */
+export function formatUsPhone(value:unknown){
+  if(typeof value!=="string"||value.length>40||!/^[\d\s().+-]*$/.test(value))return null;
+  const digits=value.replace(/\D/g,""),ten=digits.length===11&&digits.startsWith("1")?digits.slice(1):digits;
+  return /^[2-9]\d{2}[2-9]\d{6}$/.test(ten)?`(${ten.slice(0,3)}) ${ten.slice(3,6)}-${ten.slice(6)}`:null;
+}
 
 function schema(db: Database.Database) {
   db.pragma("foreign_keys = ON");
@@ -54,7 +68,7 @@ function schema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS cp_disputes(id INTEGER PRIMARY KEY,dispute_id TEXT UNIQUE NOT NULL,order_id INTEGER NOT NULL,candidate_id INTEGER NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL,opened_at TEXT NOT NULL,assigned_to TEXT NOT NULL,FOREIGN KEY(order_id) REFERENCES cp_orders(id),FOREIGN KEY(candidate_id) REFERENCES cp_candidates(id));
     CREATE TABLE IF NOT EXISTS cp_billing_approval_requests(id INTEGER PRIMARY KEY AUTOINCREMENT,billing_id INTEGER NOT NULL,requested_amount REAL NOT NULL,reason TEXT NOT NULL,note TEXT NOT NULL,status TEXT NOT NULL,requested_by TEXT NOT NULL,requested_at TEXT NOT NULL,FOREIGN KEY(billing_id) REFERENCES cp_billing(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS cp_candidate_progress(candidate_id INTEGER PRIMARY KEY,personal_status TEXT NOT NULL,address_status TEXT NOT NULL,disclosure_status TEXT NOT NULL,authorization_status TEXT NOT NULL,document_status TEXT NOT NULL,current_step TEXT NOT NULL,disclosure_acknowledged_at TEXT,signature_name TEXT,authorized_at TEXT,updated_by TEXT,updated_at TEXT NOT NULL,FOREIGN KEY(candidate_id) REFERENCES cp_candidates(id) ON DELETE CASCADE);
-    CREATE TABLE IF NOT EXISTS cp_vendors(id INTEGER PRIMARY KEY,name TEXT,coverage TEXT,jurisdictions TEXT,turnaround TEXT,cost REAL,quality INTEGER,preferred INTEGER,status TEXT,contact TEXT);
+    CREATE TABLE IF NOT EXISTS cp_vendors(id INTEGER PRIMARY KEY,name TEXT,coverage TEXT,jurisdictions TEXT,turnaround TEXT,cost REAL,quality INTEGER,preferred INTEGER,status TEXT,contact TEXT,phone TEXT);
     CREATE TABLE IF NOT EXISTS cp_meta(key TEXT PRIMARY KEY,value TEXT);
     CREATE INDEX IF NOT EXISTS idx_cp_orders_status ON cp_orders(status);
     CREATE INDEX IF NOT EXISTS idx_cp_orders_candidate ON cp_orders(candidate_id);
@@ -97,6 +111,13 @@ function schema(db: Database.Database) {
   if(!billingColumns.has("resolution_note"))db.exec("ALTER TABLE cp_billing ADD COLUMN resolution_note TEXT");
   if(!billingColumns.has("resolved_by"))db.exec("ALTER TABLE cp_billing ADD COLUMN resolved_by TEXT");
   if(!billingColumns.has("resolved_at"))db.exec("ALTER TABLE cp_billing ADD COLUMN resolved_at TEXT");
+  const vendorColumns = new Set((db.prepare("PRAGMA table_info(cp_vendors)").all() as Array<{name:string}>).map(column=>column.name));
+  if(!vendorColumns.has("phone")){
+    db.exec("ALTER TABLE cp_vendors ADD COLUMN phone TEXT");
+    // Once, when the column is added: seeded vendors get their made-up phone. A phone cleared later stays cleared.
+    const seedPhone=db.prepare("UPDATE cp_vendors SET phone=? WHERE name=? AND COALESCE(phone,'')=''");
+    for(const [name,phone] of Object.entries(VENDOR_TEST_PHONES))seedPhone.run(phone,name);
+  }
   db.exec("UPDATE cp_orders SET hiring_location=COALESCE(NULLIF(hiring_location,''),'Denver, CO'),recruiter=COALESCE(NULLIF(recruiter,''),'Alyssa Moore'),updated_at=COALESCE(NULLIF(updated_at,''),order_date || ' 08:00:00')");
 }
 
@@ -112,7 +133,7 @@ export function resetClearPath(): ClearPathSeedSummary {
     ];
     const iu=db.prepare("INSERT INTO cp_users(email,password,role,name) VALUES(?,?,?,?)"); users.forEach(u=>iu.run(u[0],hashPassword("demo123"),u[1],u[2]));
     const ic=db.prepare("INSERT INTO cp_clients(name,industry,status) VALUES(?,?,?)"); clients.forEach(c=>ic.run(c[0],c[1],"Active"));
-    const iv=db.prepare("INSERT INTO cp_vendors(name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact) VALUES(?,?,?,?,?,?,?,'Active',?)"); vendors.forEach((v,i)=>iv.run(...v,`ops${i+1}@vendor.example`));
+    const iv=db.prepare("INSERT INTO cp_vendors(name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact,phone) VALUES(?,?,?,?,?,?,?,'Active',?,?)"); vendors.forEach((v,i)=>iv.run(...v,`ops${i+1}@vendor.example`,VENDOR_TEST_PHONES[String(v[0])]??null));
     const templates=[
       ["candidate_missing_authorization","Candidate","Missing authorization request","Action required: complete your screening authorization","Hello {{candidateName}}, please sign in to complete the authorization required for your {{clientName}} background screening."],
       ["candidate_verification_assistance","Candidate","Verification assistance request","Information needed for your verification","Hello {{candidateName}}, we need additional employer or school contact information to complete your screening."],
@@ -298,7 +319,7 @@ export function createInvoice(billingId:number,input:CreateInvoiceInput,actor:Ac
 export type CreateVendorMessageInput={subject:string;body:string;searchId?:string;followUpDate?:string};
 export function vendorWithMessages(id:number){
   const db=getClearPath();
-  const vendor=db.prepare("SELECT id,name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact FROM cp_vendors WHERE id=?").get(id) as Row|undefined;
+  const vendor=db.prepare("SELECT id,name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact,phone FROM cp_vendors WHERE id=?").get(id) as Row|undefined;
   if(!vendor)throw new Error("Vendor not found");
   const messages=db.prepare("SELECT id,vendor_id vendorId,subject,body,search_id searchId,follow_up_date followUpDate,direction,status,sent_by sentBy,sent_at sentAt FROM cp_vendor_messages WHERE vendor_id=? ORDER BY id DESC").all(id) as Row[];
   return {vendor,messages};
@@ -346,7 +367,7 @@ export type CandidateRequestInput={templateKey:string;followUpDate:string;orderS
 export const CLEARPATH_CANDIDATE_STEPS=["Personal Information","Address History","Disclosure Review","Authorization Signature"] as const;
 export type CandidatePortalProgressInput={step:string;status:string;personal?:{name?:string;email?:string;phone?:string};address?:{address?:string;previousAddress?:string};acknowledged?:boolean;signatureName?:string};
 export type ClientOrderInput={candidate:CandidateInput;position:string;package:string;targetDate:string;priority:string;hiringLocation:string;recruiter:string};
-export type VendorInput={name:string;coverage:string;jurisdictions:string;turnaround:string;cost:number;quality:number;preferred:boolean;status:string;contact:string};
+export type VendorInput={name:string;coverage:string;jurisdictions:string;turnaround:string;cost:number;quality:number;preferred:boolean;status:string;contact:string;phone?:string|null};
 export type UpdateVendorInput=Partial<VendorInput>;
 
 const orderRecordSql=`SELECT o.id,o.order_id orderId,o.candidate_id candidateId,o.client_id clientId,c.name candidate,cl.name client,c.email candidateEmail,o.position,o.package,o.order_date orderDate,o.target_date targetDate,o.status,o.assigned_to assignedTo,o.aging,o.issue,o.priority,o.hiring_location hiringLocation,o.recruiter,o.updated_at updatedAt FROM cp_orders o JOIN cp_candidates c ON c.id=o.candidate_id JOIN cp_clients cl ON cl.id=o.client_id WHERE o.order_id=?`;
@@ -763,7 +784,7 @@ export function createClientSubmittedOrder(email:string,input:ClientOrderInput,a
 }
 
 function vendorRecord(db:Database.Database,id:number){
-  const vendor=db.prepare("SELECT id,name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact FROM cp_vendors WHERE id=?").get(id) as {id:number;name:string;coverage:string;jurisdictions:string;turnaround:string;cost:number;quality:number;preferred:number;status:string;contact:string}|undefined;
+  const vendor=db.prepare("SELECT id,name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact,phone FROM cp_vendors WHERE id=?").get(id) as {id:number;name:string;coverage:string;jurisdictions:string;turnaround:string;cost:number;quality:number;preferred:number;status:string;contact:string;phone:string|null}|undefined;
   return vendor?{...vendor,preferred:vendor.preferred===1}:undefined;
 }
 export function vendorsList(){
@@ -775,7 +796,7 @@ export function createVendor(input:VendorInput,actor:ActionActor){
   const db=getClearPath();
   return db.transaction(()=>{
     if(db.prepare("SELECT 1 FROM cp_vendors WHERE lower(name)=lower(?)").get(input.name))throw new Error("Vendor name already exists");
-    const inserted=db.prepare("INSERT INTO cp_vendors(name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact) VALUES(?,?,?,?,?,?,?,?,?)").run(input.name,input.coverage,input.jurisdictions,input.turnaround,input.cost,input.quality,input.preferred?1:0,input.status,input.contact);
+    const inserted=db.prepare("INSERT INTO cp_vendors(name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact,phone) VALUES(?,?,?,?,?,?,?,?,?,?)").run(input.name,input.coverage,input.jurisdictions,input.turnaround,input.cost,input.quality,input.preferred?1:0,input.status,input.contact,input.phone??null);
     const vendor=vendorRecord(db,Number(inserted.lastInsertRowid))!;
     writeDomainAudit(db,actor,"Vendor created","Vendor",String(vendor.id),"",{vendor});
     return vendor;
@@ -784,11 +805,11 @@ export function createVendor(input:VendorInput,actor:ActionActor){
 export function updateVendor(vendorId:number,input:UpdateVendorInput,actor:ActionActor,note=""){
   const db=getClearPath();
   return db.transaction(()=>{
-    const before=db.prepare("SELECT id,name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact FROM cp_vendors WHERE id=?").get(vendorId) as Row|undefined;if(!before)throw new Error("Vendor not found");
+    const before=db.prepare("SELECT id,name,coverage,jurisdictions,turnaround,cost,quality,preferred,status,contact,phone FROM cp_vendors WHERE id=?").get(vendorId) as Row|undefined;if(!before)throw new Error("Vendor not found");
     if(input.name!==undefined&&db.prepare("SELECT 1 FROM cp_vendors WHERE lower(name)=lower(?) AND id!=?").get(input.name,vendorId))throw new Error("Vendor name already exists");
-    const mapping:Record<keyof UpdateVendorInput,string>={name:"name",coverage:"coverage",jurisdictions:"jurisdictions",turnaround:"turnaround",cost:"cost",quality:"quality",preferred:"preferred",status:"status",contact:"contact"};
-    const changed:Record<string,string|number>={};
-    for(const [key,column] of Object.entries(mapping) as Array<[keyof UpdateVendorInput,string]>){const raw=input[key],value=key==="preferred"&&raw!==undefined?(raw?1:0):raw;if(value!==undefined&&before[column]!==value)changed[column]=value as string|number}
+    const mapping:Record<keyof UpdateVendorInput,string>={name:"name",coverage:"coverage",jurisdictions:"jurisdictions",turnaround:"turnaround",cost:"cost",quality:"quality",preferred:"preferred",status:"status",contact:"contact",phone:"phone"};
+    const changed:Record<string,string|number|null>={};
+    for(const [key,column] of Object.entries(mapping) as Array<[keyof UpdateVendorInput,string]>){const raw=input[key],value=key==="preferred"&&raw!==undefined?(raw?1:0):raw;if(value!==undefined&&(before[column]??null)!==value)changed[column]=value as string|number|null}
     if(!Object.keys(changed).length)throw new Error("No changes submitted");
     const assignments=Object.keys(changed).map(column=>`${column}=?`).join(",");db.prepare(`UPDATE cp_vendors SET ${assignments} WHERE id=?`).run(...Object.values(changed),vendorId);
     const vendor=vendorRecord(db,vendorId)!;

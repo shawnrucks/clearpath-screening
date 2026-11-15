@@ -219,8 +219,19 @@ try{
   await expectStatus("/api/clearpath/client/orders",400,{method:"POST",cookie:sessions.client,body:{clientId:2}});
   await expectStatus("/api/clearpath/client/orders",400,{method:"POST",cookie:sessions.client,body:{candidate:{name:"Past Target Candidate",dob:"1992-06-18",ssn:"9876",email:"past.target@example.com",phone:"(303) 555-9876",address:"9876 Client Way, Denver, CO",previousAddress:"",aliases:"None reported"},position:"Clinical Coordinator",package:"Healthcare",targetDate:"2020-01-01",priority:"High",hiringLocation:"Denver, CO",recruiter:"Alyssa Moore"}});
   await expectStatus("/api/clearpath/client/orders",403,{cookie:sessions.operations});
-  const vendorPost=await expectStatus("/api/clearpath/vendors",201,{method:"POST",cookie:sessions.operations,body:{name:"Rocky Mountain Verification",coverage:"Employment and education",jurisdictions:"CO, WY, NM",turnaround:"2.1 days",cost:26.5,quality:93,preferred:false,status:"Active",contact:"operations@rockymountain.example"}});
+  // Each seeded vendor has its own made-up phone in 555-0100..0199, the range set aside for fiction.
+  const seededVendors=(await expectStatus("/api/clearpath/vendors",200,{cookie:sessions.operations})).data.vendors;
+  const seededPhones=seededVendors.map(vendor=>vendor.phone);
+  assert.equal(seededPhones.length,6);assertions++;
+  check(seededPhones.every(phone=>/^\(720\) 555-01\d\d$/.test(phone)),`seeded vendor phones must be fictional 555-01xx numbers: ${seededPhones}`);
+  assert.equal(new Set(seededPhones).size,6);assertions++;
+  await expectStatus("/api/clearpath/vendors",400,{method:"POST",cookie:sessions.operations,body:{name:"Bad Phone Verification",coverage:"Employment",jurisdictions:"CO",turnaround:"2 days",cost:25,quality:90,preferred:false,status:"Active",contact:"ops@badphone.example",phone:"12345"}});
+  const vendorPost=await expectStatus("/api/clearpath/vendors",201,{method:"POST",cookie:sessions.operations,body:{name:"Rocky Mountain Verification",coverage:"Employment and education",jurisdictions:"CO, WY, NM",turnaround:"2.1 days",cost:26.5,quality:93,preferred:false,status:"Active",contact:"operations@rockymountain.example",phone:"720.555.0107"}});
   const createdVendorId=vendorPost.data.vendor.id;assert.equal(vendorPost.data.vendor.preferred,false);assertions++;
+  assert.equal(vendorPost.data.vendor.phone,"(720) 555-0107");assertions++;
+  await expectStatus(`/api/clearpath/vendors/${createdVendorId}`,400,{method:"PATCH",cookie:sessions.admin,body:{phone:"not a phone"}});
+  await expectStatus(`/api/clearpath/vendors/${createdVendorId}`,400,{method:"PATCH",cookie:sessions.admin,body:{phone:"call 720 555 0109 now"}});
+  assert.equal((await expectStatus(`/api/clearpath/vendors/${createdVendorId}`,200,{method:"PATCH",cookie:sessions.admin,body:{phone:""}})).data.vendor.phone,null);assertions++;
   await expectStatus("/api/clearpath/vendors",400,{method:"POST",cookie:sessions.operations,body:{name:"Rocky Mountain Verification",coverage:"Employment",jurisdictions:"CO",turnaround:"2 days",cost:25,quality:90,preferred:false,status:"Active",contact:"duplicate@rockymountain.example"}});
   const vendorPatch=await expectStatus(`/api/clearpath/vendors/${createdVendorId}`,200,{method:"PATCH",cookie:sessions.admin,body:{quality:98,preferred:true,turnaround:"1.6 days",note:"Preferred after quality review."}});
   assert.equal(vendorPatch.data.vendor.quality,98);assertions++;

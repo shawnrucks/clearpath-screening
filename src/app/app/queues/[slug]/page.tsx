@@ -76,7 +76,7 @@ const searchSelect = `
     s.status, CAST(julianday('2026-07-12')-julianday(COALESCE(s.date_assigned,o.order_date)) AS INTEGER) aging,
     CASE WHEN s.vendor='Unassigned' THEN 'Unassigned' ELSE s.vendor END assigned_to,
     CASE WHEN s.due_date<'2026-07-12' THEN 'Urgent' WHEN o.priority IN ('Urgent','High') THEN o.priority ELSE 'Normal' END priority,
-    s.due_date, s.type, s.jurisdiction, s.vendor, v.contact vendor_contact, s.vendor_cost, s.expected_cost,
+    s.due_date, s.type, s.jurisdiction, s.vendor, v.contact vendor_contact, v.phone vendor_phone, s.vendor_cost, s.expected_cost,
     s.client_price, s.result, s.notes, NULL issue_count, NULL reviewer
   FROM cp_searches s
   JOIN cp_orders o ON o.id=s.order_id
